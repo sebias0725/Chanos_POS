@@ -40,7 +40,9 @@ private val DarkColors = darkColorScheme(
 @Composable
 fun ShopTheme(content: @Composable () -> Unit) {
     val dark = LocalThemePreference.dark
-    MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, content = content)
+    val brand = Color(UserProfile.palette)
+    val colors = if (dark) DarkColors.copy(primary = brand, secondary = brand) else LightColors.copy(primary = brand, secondary = brand)
+    MaterialTheme(colorScheme = colors, content = content)
 }
 
 @Composable

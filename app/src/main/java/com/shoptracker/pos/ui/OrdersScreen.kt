@@ -4,6 +4,9 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -52,6 +55,7 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
     var cancelling by remember { mutableStateOf<SalesOrder?>(null) }
     var editingTime by remember { mutableStateOf<SalesOrder?>(null) }
     var details by remember { mutableStateOf<SalesOrder?>(null) }
+    var copied by remember { mutableStateOf(false) }
     val context = LocalContext.current
     val orders = remember(data) { data.orders.filter { it.status == STATUS_COMPLETED }.sortedWith(compareBy<SalesOrder> { deliverySortKey(it.deliveryTime) }.thenBy { it.createdAt }) }
     fun copyOrders() {
@@ -71,6 +75,7 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
         }
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
         clipboard.setPrimaryClip(ClipData.newPlainText("Today's Orders", body))
+        copied = true
     }
 
     Column(Modifier.fillMaxSize()) {
@@ -78,6 +83,7 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
             ScreenHeader(if (day != null) "Orders • ${Fmt.dayMonth(day.openedAt)}" else "Orders", onBack)
             IconButton(onClick = { copyOrders() }) { Text("Copy", style = MaterialTheme.typography.labelMedium) }
         }
+        if (copied) Text("Orders copied to clipboard", modifier = Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
         if (orders.isEmpty()) {
             EmptyState(
                 "No orders yet",
@@ -95,8 +101,22 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
                     val itemsTotal = lines.sumOf { it.totalCentavos }
                     val done = o.status == STATUS_COMPLETED
                     val strike = if (done) TextDecoration.None else TextDecoration.LineThrough
+                    var swipeDistance by remember(o.id) { mutableStateOf(0f) }
                     Card(
-                        Modifier.fillMaxWidth(),
+                        Modifier.fillMaxWidth()
+                            .pointerInput(o.id, o.delivered) {
+                                detectHorizontalDragGestures(
+                                    onDragEnd = {
+                                        if (swipeDistance < -100f && !o.delivered && day != null) vm.setOrderDelivered(o.id, true)
+                                        swipeDistance = 0f
+                                    },
+                                    onDragCancel = { swipeDistance = 0f },
+                                    onHorizontalDrag = { change, delta ->
+                                        swipeDistance += delta
+                                        if (kotlin.math.abs(swipeDistance) > 15f) change.consume()
+                                    }
+                                )
+                            }.clickable { details = o },
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
                         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

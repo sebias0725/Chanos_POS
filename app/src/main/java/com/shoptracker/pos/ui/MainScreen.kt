@@ -246,13 +246,7 @@ private fun TopSummary(
                 StatusChip(day)
             }
 
-            Row(Modifier.fillMaxWidth()) {
-                NavText("Products", onProducts)
-                NavText("Orders", onOrders)
-                NavText("Expenses", onExpenses)
-                NavText("Delivery Rates", onRates)
-                NavText("History", onHistory)
-            }
+
 
             Row {
                 Column(Modifier.weight(1f)) {
@@ -431,30 +425,20 @@ private fun BottomBar(
             FilledTonalButton(
                 onClick = onUndo,
                 enabled = canUndo,
-                modifier = Modifier.weight(1f).height(56.dp),
+                modifier = Modifier.weight(1f).height(44.dp),
                 contentPadding = pad
-            ) { Text("UNDO", fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+            ) { Text("UNDO", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
             Button(
                 onClick = onNewOrder,
-                modifier = Modifier.weight(1.2f).height(56.dp),
+                modifier = Modifier.weight(1f).height(44.dp),
                 contentPadding = pad
-            ) { Text("NEW ORDER", fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+            ) { Text("NEW ORDER", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
             Button(
                 onClick = onNewDay,
-                modifier = Modifier.weight(1.1f).height(56.dp),
+                modifier = Modifier.weight(1f).height(44.dp),
                 contentPadding = pad
-            ) { Text(if (dayActive) "CLOSE DAY" else "NEW DAY", fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+            ) { Text(if (dayActive) "CLOSE DAY" else "NEW DAY", fontSize = 12.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            OutlinedButton(onClick = onChart, modifier = Modifier.weight(1f).height(44.dp), contentPadding = pad) {
-                Text("CHART", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            }
-            OutlinedButton(onClick = onCompare, modifier = Modifier.weight(1f).height(44.dp), contentPadding = pad) {
-                Text("COMPARE", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            }
-            OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f).height(44.dp), contentPadding = pad) {
-                Text("EXPORT", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
-            }
-        }
+
     }
 }

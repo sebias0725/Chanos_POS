@@ -1,6 +1,9 @@
 package com.shoptracker.pos.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.width
@@ -52,6 +55,10 @@ sealed interface Screen {
 
 @Composable
 fun App(vm: MainViewModel) {
+    if (UserProfile.name.isBlank()) {
+        CreateUserScreen(onCreated = {})
+        return
+    }
     val stack = remember { mutableStateListOf<Screen>(Screen.Main) }
     val screen = stack.last()
     val snackbar = remember { SnackbarHostState() }
@@ -70,7 +77,7 @@ fun App(vm: MainViewModel) {
         if (stack.size > 1) stack.removeAt(stack.lastIndex)
     }
 
-    BackHandler(enabled = stack.size > 1) { pop() }
+    BackHandler(enabled = sidebar || stack.size > 1) { if (sidebar) sidebar = false else pop() }
 
     LaunchedEffect(Unit) {
         vm.events.collect { msg ->
@@ -88,34 +95,8 @@ fun App(vm: MainViewModel) {
                 .fillMaxSize()
                 .padding(padding)
         ) {
-            Row(Modifier.fillMaxSize()) {
-                if (sidebar) {
-                    Surface(Modifier.width(190.dp).fillMaxHeight(), tonalElevation = 5.dp) {
-                        Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                            Button(onClick = { sidebar = false }) { Text("‹ Hide") }
-                            listOf(
-                                "Dashboard" to Screen.Main, "Products" to Screen.Products,
-                                "Orders" to Screen.Orders, "Expenses" to Screen.Expenses,
-                                "Wastes" to Screen.Wastes,
-                                "Delivery Rates" to Screen.Rates, "History" to Screen.History,
-                                "Chart" to Screen.Chart, "Compare" to Screen.Compare,
-                                "Export" to Screen.Export
-                            ).forEach { (label, destination) ->
-                                Button(onClick = { stack.clear(); stack.add(Screen.Main); if (destination != Screen.Main) push(destination); sidebar = false }, modifier = Modifier.fillMaxWidth()) { Text(label) }
-                            }
-                            Row {
-                                Text("Dark Mode")
-                                Switch(checked = LocalThemePreference.dark, onCheckedChange = {
-                                    LocalThemePreference.dark = it
-                                    themePrefs.edit().putBoolean("dark_mode", it).apply()
-                                })
-                            }
-                        }
-                    }
-                } else {
-                    Button(onClick = { sidebar = true }, modifier = Modifier.width(42.dp)) { Text("›") }
-                }
-                Box(Modifier.weight(1f)) {
+            // Main content keeps its full width; the navigation drawer floats above it.
+            Box(Modifier.fillMaxSize()) {
             when (screen) {
                 Screen.Main -> MainScreen(
                     vm = vm,
@@ -148,6 +129,84 @@ fun App(vm: MainViewModel) {
                 Screen.Compare -> CompareScreen(vm, onBack = { pop() })
                 Screen.NewDay -> NewDayScreen(vm, onBack = { pop() }, onDone = { pop() })
             }
+                // A small edge handle remains available without resizing the dashboard.
+                if (!sidebar) {
+                    androidx.compose.material3.FilledTonalButton(
+                        onClick = { sidebar = true },
+                        modifier = Modifier.align(androidx.compose.ui.Alignment.CenterStart)
+                            .width(36.dp),
+                        contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(
+                            topStart = 0.dp, bottomStart = 0.dp, topEnd = 14.dp, bottomEnd = 14.dp
+                        )
+                    ) { Text("›") }
+                }
+                if (sidebar) {
+                    // Tap outside the panel to dismiss; no underlying dashboard interaction.
+                    Box(
+                        Modifier.fillMaxSize()
+                            .background(androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.38f))
+                            .clickable { sidebar = false }
+                    )
+                    Surface(
+                        modifier = Modifier.fillMaxHeight().width(220.dp),
+                        shape = androidx.compose.foundation.shape.RoundedCornerShape(
+                            topEnd = 20.dp, bottomEnd = 20.dp
+                        ),
+                        shadowElevation = 12.dp,
+                        tonalElevation = 4.dp
+                    ) {
+                        Column(
+                            modifier = Modifier.verticalScroll(rememberScrollState())
+                                .padding(horizontal = 10.dp, vertical = 12.dp),
+                            verticalArrangement = Arrangement.spacedBy(0.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(UserProfile.name, style = MaterialTheme.typography.titleMedium,
+                                    modifier = Modifier.weight(1f))
+                                androidx.compose.material3.IconButton(onClick = { sidebar = false }) {
+                                    Text("‹", style = MaterialTheme.typography.titleLarge)
+                                }
+                            }
+                            listOf(
+                                "Dashboard" to Screen.Main, "Products" to Screen.Products,
+                                "Orders" to Screen.Orders, "Expenses" to Screen.Expenses,
+                                "Wastes" to Screen.Wastes, "Delivery Rates" to Screen.Rates,
+                                "History" to Screen.History, "Chart" to Screen.Chart,
+                                "Compare" to Screen.Compare, "Export" to Screen.Export
+                            ).forEach { (label, destination) ->
+                                androidx.compose.material3.TextButton(
+                                    onClick = {
+                                        stack.clear()
+                                        stack.add(Screen.Main)
+                                        if (destination != Screen.Main) push(destination)
+                                        sidebar = false
+                                    },
+                                    modifier = Modifier.fillMaxWidth()
+                                        .height(40.dp),
+                                    contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp)
+                                ) {
+                                    Text(label, modifier = Modifier.fillMaxWidth(),
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Start)
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text("Dark Mode")
+                                Switch(checked = LocalThemePreference.dark, onCheckedChange = {
+                                    LocalThemePreference.dark = it
+                                    themePrefs.edit().putBoolean("dark_mode", it).apply()
+                                })
+                            }
+                        }
+                    }
                 }
             }
         }
