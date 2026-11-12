@@ -18,7 +18,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         Category::class,
         Waste::class
     ],
-    version = 8,
+    version = 9,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -160,6 +160,46 @@ abstract class AppDatabase : RoomDatabase() {
          * v5 -> v6: orders get a payment method and a preferred delivery time. Both default to ''
          * ("not recorded"), so every existing order keeps all of its data and totals unchanged.
          */
+        /** Adds starter inventory without modifying existing products, stock or transactions. */
+        private fun seedStarterInventory(db: SupportSQLiteDatabase) {
+            val now = System.currentTimeMillis()
+            for (category in listOf("CHANOS", "S&M")) {
+                db.execSQL(
+                    "INSERT INTO categories (name, createdAt) SELECT ?, ? WHERE NOT EXISTS " +
+                        "(SELECT 1 FROM categories WHERE name = ? COLLATE NOCASE)",
+                    arrayOf<Any>(category, now, category)
+                )
+            }
+            val products = listOf(
+                arrayOf("Dry Rub Signature", "CHANOS", 23000L, 7000L, 10),
+                arrayOf("Marinated Classic", "CHANOS", 23000L, 7000L, 10),
+                arrayOf("Steamed-Grilled", "CHANOS", 23000L, 6500L, 10),
+                arrayOf("Classic Lumpia", "S&M", 18500L, 5000L, 20),
+                arrayOf("Cheese Lumpia", "S&M", 22000L, 5000L, 25),
+                arrayOf("Longganisa Patty", "S&M", 18500L, 7500L, 20),
+                arrayOf("Chicken Cordon Bleu", "S&M", 22000L, 5500L, 20),
+                arrayOf("Daing Bangus", "S&M", 22000L, 6000L, 10),
+                arrayOf("Cheese Sticks", "S&M", 8000L, 2500L, 20)
+            )
+            for (product in products) {
+                val name = product[0] as String
+                val category = product[1] as String
+                db.execSQL(
+                    "INSERT INTO products (name, priceCentavos, active, createdAt, profitCentavos, stock, categoryId) " +
+                        "SELECT ?, ?, 1, ?, ?, ?, (SELECT id FROM categories WHERE name = ? COLLATE NOCASE ORDER BY id LIMIT 1) " +
+                        "WHERE NOT EXISTS (SELECT 1 FROM products WHERE name = ? COLLATE NOCASE)",
+                    arrayOf<Any>(name, product[2] as Long, now, product[3] as Long, product[4] as Int, category, name)
+                )
+            }
+        }
+
+        private val MIGRATION_8_9 = object : Migration(8, 9) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                seedStarterInventory(db)
+                seedDefaultRates(db)
+            }
+        }
+
         private val MIGRATION_7_8 = object : Migration(7, 8) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS wastes (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, businessDayId INTEGER NOT NULL, productId INTEGER NOT NULL, productName TEXT NOT NULL, quantity INTEGER NOT NULL, unitValueCentavos INTEGER NOT NULL, reason TEXT NOT NULL, note TEXT NOT NULL, createdAt INTEGER NOT NULL)")
@@ -205,6 +245,7 @@ abstract class AppDatabase : RoomDatabase() {
         private val SEED_ON_CREATE = object : RoomDatabase.Callback() {
             override fun onCreate(db: SupportSQLiteDatabase) {
                 seedDefaultRates(db)
+                seedStarterInventory(db)
             }
         }
 
@@ -214,7 +255,7 @@ abstract class AppDatabase : RoomDatabase() {
                     context.applicationContext,
                     AppDatabase::class.java,
                     "shop_tracker.db"
-                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8, MIGRATION_8_9)
                     .addCallback(SEED_ON_CREATE)
                     .build().also { instance = it }
             }

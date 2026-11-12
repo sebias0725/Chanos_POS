@@ -21,13 +21,27 @@ import java.io.File
 
 object UserProfile {
     var name by mutableStateOf("")
-    var palette by mutableStateOf(0xFF00796B.toInt())
+    var palette by mutableStateOf(0xFFE96A25.toInt())
     var photoVersion by mutableIntStateOf(0)
     fun photoFile(context: Context) = File(context.filesDir, "user_profile_photo")
     fun load(context: Context) {
         val prefs = context.getSharedPreferences("settings", Context.MODE_PRIVATE)
-        name = prefs.getString("user_name", "") ?: ""
-        palette = prefs.getInt("user_palette", 0xFF00796B.toInt())
+        name = prefs.getString("user_name", "CHANOS") ?: "CHANOS"
+        // Install the bundled CHANOS image only when there is no existing user photo.
+        // Never overwrite a photo chosen by the user during a later app upgrade.
+        val existingPhoto = photoFile(context)
+        if (!existingPhoto.exists()) {
+            context.assets.open("chanos_profile.jpg").use { source ->
+                existingPhoto.outputStream().use { destination -> source.copyTo(destination) }
+            }
+            photoVersion++
+        }
+        val storedPalette = prefs.getInt("user_palette", 0)
+        palette = if (storedPalette == 0 || (storedPalette == 0xFF00796B.toInt() &&
+            prefs.getString("user_name", "CHANOS") == "CHANOS")) {
+            // The legacy teal default is replaced for the bundled CHANOS profile.
+            0xFFE96A25.toInt()
+        } else storedPalette
         LocalThemePreference.dark = prefs.getBoolean("dark_mode", false)
     }
     fun save(context: Context, newName: String, source: Uri?) {
@@ -44,7 +58,7 @@ object UserProfile {
     }
     private fun extractPalette(file: File): Int {
         val options = BitmapFactory.Options().apply { inSampleSize = 8 }
-        val bitmap = BitmapFactory.decodeFile(file.absolutePath, options) ?: return 0xFF00796B.toInt()
+        val bitmap = BitmapFactory.decodeFile(file.absolutePath, options) ?: return 0xFFE96A25.toInt()
         val bins = HashMap<Int, Int>()
         for (y in 0 until bitmap.height step 2) for (x in 0 until bitmap.width step 2) {
             val c = bitmap.getPixel(x, y)
@@ -59,7 +73,7 @@ object UserProfile {
             bins[key] = (bins[key] ?: 0) + 1
         }
         bitmap.recycle()
-        return bins.maxByOrNull { it.value }?.key ?: 0xFF00796B.toInt()
+        return bins.maxByOrNull { it.value }?.key ?: 0xFFE96A25.toInt()
     }
 }
 
