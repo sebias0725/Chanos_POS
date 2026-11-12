@@ -25,9 +25,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.Icon
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -79,7 +76,7 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             ScreenHeader(if (day != null) "Orders • ${Fmt.dayMonth(day.openedAt)}" else "Orders", onBack)
-            IconButton(onClick = { copyOrders() }) { Icon(Icons.Default.ContentCopy, contentDescription = "Copy today's orders") }
+            IconButton(onClick = { copyOrders() }) { Text("Copy", style = MaterialTheme.typography.labelMedium) }
         }
         if (orders.isEmpty()) {
             EmptyState(
