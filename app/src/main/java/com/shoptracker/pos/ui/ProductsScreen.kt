@@ -11,7 +11,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
@@ -45,9 +47,9 @@ import com.shoptracker.pos.util.Fmt
 fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val products by vm.products.collectAsState()
     val lifetime by vm.lifetime.collectAsState()
-    val todayTxns by vm.todayTxns.collectAsState()
-    val todayStats = remember(todayTxns) { com.shoptracker.pos.data.computeStats(todayTxns) }
-    val todayById = remember(todayStats) { todayStats.products.associateBy { it.productId } }
+    val day by vm.openDay.collectAsState()
+    val data = rememberDayData(vm, setOfNotNull(day?.id))
+    val todayById = remember(data) { data.stats.products.associateBy { it.productId } }
 
     var editing by remember { mutableStateOf<Product?>(null) }
     var adding by remember { mutableStateOf(false) }
@@ -78,7 +80,16 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
                                 Row(verticalAlignment = Alignment.CenterVertically) {
                                     Column(Modifier.weight(1f)) {
                                         Text(p.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                                        Text(Fmt.peso(p.priceCentavos), style = MaterialTheme.typography.bodyMedium)
+                                        Text(
+                                            "Price ${Fmt.peso(p.priceCentavos)}  •  Profit ${Fmt.peso(p.profitCentavos)} each",
+                                            style = MaterialTheme.typography.bodyMedium
+                                        )
+                                        Text(
+                                            "Stocks: ${p.stock}",
+                                            style = MaterialTheme.typography.bodyMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (p.stock <= 0) negativeColor() else androidx.compose.ui.graphics.Color.Unspecified
+                                        )
                                     }
                                     Switch(checked = p.active, onCheckedChange = { vm.updateProduct(p.copy(active = it)) })
                                 }
@@ -91,13 +102,11 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                                     Text(
                                         if (p.active) "Active" else "Disabled (hidden from POS)",
                                         style = MaterialTheme.typography.labelMedium,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .align(Alignment.CenterVertically)
+                                        modifier = Modifier.weight(1f)
                                     )
                                     IconButton(onClick = { editing = p }) { Icon(Icons.Default.Edit, "Edit") }
                                     IconButton(onClick = { deleting = p }) { Icon(Icons.Default.Delete, "Delete") }
@@ -121,8 +130,8 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
         ProductDialog(
             initial = null,
             onDismiss = { adding = false },
-            onSave = { name, price ->
-                vm.addProduct(name, price)
+            onSave = { name, price, profit, stock ->
+                vm.addProduct(name, price, profit, stock)
                 adding = false
             }
         )
@@ -131,8 +140,15 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
         ProductDialog(
             initial = p,
             onDismiss = { editing = null },
-            onSave = { name, price ->
-                vm.updateProduct(p.copy(name = name.trim(), priceCentavos = price))
+            onSave = { name, price, profit, stock ->
+                vm.updateProduct(
+                    p.copy(
+                        name = name.trim(),
+                        priceCentavos = price,
+                        profitCentavos = profit,
+                        stock = stock
+                    )
+                )
                 editing = null
             }
         )
@@ -162,21 +178,31 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
 private fun ProductDialog(
     initial: Product?,
     onDismiss: () -> Unit,
-    onSave: (String, Long) -> Unit
+    onSave: (String, Long, Long, Int) -> Unit
 ) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var price by remember { mutableStateOf(if (initial != null) Fmt.plain(initial.priceCentavos) else "") }
+    var profit by remember { mutableStateOf(if (initial != null) Fmt.plain(initial.profitCentavos) else "") }
+    var stock by remember { mutableStateOf(initial?.stock?.toString() ?: "") }
     var showErrors by remember { mutableStateOf(false) }
 
     val priceCentavos = Fmt.parsePeso(price)
+    val profitCentavos = if (profit.isBlank()) 0L else Fmt.parsePeso(profit)
+    val stockN = if (stock.isBlank()) 0 else stock.toIntOrNull()
+
     val nameError = if (showErrors && name.isBlank()) "Enter a name" else null
     val priceError = if (showErrors && (priceCentavos == null || priceCentavos <= 0L)) "Enter a price above 0" else null
+    val profitError = if (showErrors && profitCentavos == null) "Enter a valid amount" else null
+    val stockError = if (showErrors && stockN == null) "Enter a whole number" else null
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "Add product" else "Edit product") },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Column(
+                Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { if (it.length <= 40) name = it },
@@ -188,9 +214,15 @@ private fun ProductDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 MoneyField(price, { price = it }, "Selling price", error = priceError)
+                MoneyField(profit, { profit = it }, "Profit per unit", error = profitError)
+                NumberField(
+                    stock, { stock = it }, "Stocks (units remaining)",
+                    error = stockError,
+                    hint = "Goes down with each sale, back up on undo / remove"
+                )
                 if (initial != null) {
                     Text(
-                        "Changing the price only affects future sales. Past sales keep their original price.",
+                        "Changing the price or profit only affects future sales. Past sales keep their original values.",
                         style = MaterialTheme.typography.bodySmall
                     )
                 }
@@ -198,10 +230,12 @@ private fun ProductDialog(
         },
         confirmButton = {
             TextButton(onClick = {
-                if (name.isBlank() || priceCentavos == null || priceCentavos <= 0L) {
+                if (name.isBlank() || priceCentavos == null || priceCentavos <= 0L ||
+                    profitCentavos == null || stockN == null
+                ) {
                     showErrors = true
                 } else {
-                    onSave(name, priceCentavos)
+                    onSave(name, priceCentavos, profitCentavos, stockN)
                 }
             }) { Text("Save") }
         },

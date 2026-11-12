@@ -8,6 +8,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -17,6 +18,7 @@ import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -26,6 +28,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -36,6 +39,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
@@ -49,14 +53,19 @@ import com.shoptracker.pos.data.ExportScope
 import com.shoptracker.pos.data.Product
 import com.shoptracker.pos.data.STATUS_COMPLETED
 import com.shoptracker.pos.data.SalesTransaction
-import com.shoptracker.pos.data.computeStats
 import com.shoptracker.pos.util.Fmt
+
+private data class PendingAction(val product: Product, val add: Boolean)
 
 @Composable
 fun MainScreen(
     vm: MainViewModel,
     onProducts: () -> Unit,
+    onOrders: () -> Unit,
+    onExpenses: () -> Unit,
+    onRates: () -> Unit,
     onHistory: () -> Unit,
+    onNewOrder: () -> Unit,
     onNewDay: () -> Unit,
     onChart: () -> Unit,
     onCompare: () -> Unit,
@@ -64,14 +73,15 @@ fun MainScreen(
 ) {
     val products by vm.products.collectAsState()
     val day by vm.openDay.collectAsState()
-    val txns by vm.todayTxns.collectAsState()
     val allDays by vm.allDays.collectAsState()
-
-    val stats = remember(txns) { computeStats(txns) }
+    val confirmTaps by vm.confirmTaps.collectAsState()
+    val data = rememberDayData(vm, setOfNotNull(day?.id))
+    val stats = data.stats
     val active = remember(products) { products.filter { it.active } }
-    val lastSale = remember(txns) { txns.lastOrNull { it.status == STATUS_COMPLETED } }
+    val lastSale = remember(data) { data.txns.lastOrNull { it.status == STATUS_COMPLETED } }
     val haptic = LocalHapticFeedback.current
 
+    var pending by remember { mutableStateOf<PendingAction?>(null) }
     var showExport by remember { mutableStateOf(false) }
     var pendingScope by remember { mutableStateOf<ExportScope?>(null) }
     val launcher = rememberLauncherForActivityResult(
@@ -82,12 +92,26 @@ fun MainScreen(
         if (uri != null && scope != null) vm.export(uri, scope)
     }
 
+    fun request(p: Product, add: Boolean) {
+        if (confirmTaps) {
+            pending = PendingAction(p, add)
+        } else {
+            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+            if (add) vm.sell(p) else vm.removeOne(p)
+        }
+    }
+
     Column(Modifier.fillMaxSize()) {
         TopSummary(
             day = day,
             stats = stats,
             lastSale = lastSale,
+            confirmTaps = confirmTaps,
+            onConfirmChange = { vm.setConfirmTaps(it) },
             onProducts = onProducts,
+            onOrders = onOrders,
+            onExpenses = onExpenses,
+            onRates = onRates,
             onHistory = onHistory,
             onOpenSummary = { day?.let { onOpenDay(it.id) } }
         )
@@ -105,7 +129,7 @@ fun MainScreen(
                     Modifier.align(Alignment.Center)
                 )
                 else -> {
-                    val unitsById = remember(stats) { stats.products.associate { it.productId to it } }
+                    val byId = remember(stats) { stats.products.associateBy { it.productId } }
                     LazyVerticalGrid(
                         columns = GridCells.Adaptive(150.dp),
                         modifier = Modifier.fillMaxSize(),
@@ -114,16 +138,14 @@ fun MainScreen(
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
                         items(active, key = { it.id }) { p ->
-                            val s = unitsById[p.id]
+                            val s = byId[p.id]
                             ProductCard(
                                 product = p,
                                 units = s?.units ?: 0,
                                 revenue = s?.revenue ?: 0L,
                                 enabled = day != null,
-                                onTap = {
-                                    haptic.performHapticFeedback(HapticFeedbackType.LongPress)
-                                    vm.sell(p)
-                                }
+                                onAdd = { request(p, true) },
+                                onRemove = { request(p, false) }
                             )
                         }
                     }
@@ -133,12 +155,36 @@ fun MainScreen(
 
         BottomBar(
             canUndo = day != null && stats.units > 0,
-            highlightNewDay = day == null,
             onUndo = { vm.undo() },
+            onNewOrder = onNewOrder,
             onNewDay = onNewDay,
             onChart = onChart,
             onCompare = onCompare,
             onExport = { showExport = true }
+        )
+    }
+
+    pending?.let { pa ->
+        AlertDialog(
+            onDismissRequest = { pending = null },
+            title = { Text(if (pa.add) "Add 1 sale?" else "Remove 1 sale?") },
+            text = {
+                Text(
+                    pa.product.name + "  •  " + Fmt.peso(pa.product.priceCentavos),
+                    style = MaterialTheme.typography.titleMedium
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        pending = null
+                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                        if (pa.add) vm.sell(pa.product) else vm.removeOne(pa.product)
+                    },
+                    modifier = Modifier.height(52.dp)
+                ) { Text(if (pa.add) "ADD" else "REMOVE", fontWeight = FontWeight.Bold) }
+            },
+            dismissButton = { TextButton(onClick = { pending = null }) { Text("Cancel") } }
         )
     }
 
@@ -156,11 +202,27 @@ fun MainScreen(
 }
 
 @Composable
+private fun RowScope.NavText(label: String, onClick: () -> Unit) {
+    TextButton(
+        onClick = onClick,
+        modifier = Modifier.weight(1f),
+        contentPadding = PaddingValues(horizontal = 2.dp)
+    ) {
+        Text(label, fontSize = 13.sp, maxLines = 1, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
 private fun TopSummary(
     day: BusinessDay?,
     stats: DayStats,
     lastSale: SalesTransaction?,
+    confirmTaps: Boolean,
+    onConfirmChange: (Boolean) -> Unit,
     onProducts: () -> Unit,
+    onOrders: () -> Unit,
+    onExpenses: () -> Unit,
+    onRates: () -> Unit,
     onHistory: () -> Unit,
     onOpenSummary: () -> Unit
 ) {
@@ -170,26 +232,25 @@ private fun TopSummary(
             .padding(horizontal = 12.dp, vertical = 8.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
-        Column(Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Column(
-                    Modifier
-                        .weight(1f)
-                        .clickable(enabled = day != null) { onOpenSummary() }
-                ) {
-                    Text(
-                        if (day != null) Fmt.date(day.openedAt) else "No active business day",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Spacer(Modifier.height(4.dp))
-                    StatusChip(day)
-                }
-                TextButton(onClick = onProducts) { Text("Products") }
-                TextButton(onClick = onHistory) { Text("History") }
+        Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Column(Modifier.clickable(enabled = day != null) { onOpenSummary() }) {
+                Text(
+                    if (day != null) Fmt.date(day.openedAt) else "No active business day",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+                Spacer(Modifier.height(4.dp))
+                StatusChip(day)
             }
 
-            Spacer(Modifier.height(10.dp))
+            Row(Modifier.fillMaxWidth()) {
+                NavText("Products", onProducts)
+                NavText("Orders", onOrders)
+                NavText("Expenses", onExpenses)
+                NavText("DF Rates", onRates)
+                NavText("History", onHistory)
+            }
+
             Row {
                 Column(Modifier.weight(1f)) {
                     Text("Total sales", style = MaterialTheme.typography.labelMedium)
@@ -198,6 +259,13 @@ private fun TopSummary(
                         style = MaterialTheme.typography.headlineMedium,
                         fontWeight = FontWeight.Bold
                     )
+                    if (stats.deliveryFees > 0) {
+                        Text(
+                            "incl. ${Fmt.peso(stats.deliveryFees)} delivery fees",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
                 }
                 Column(Modifier.weight(1f)) {
                     Text("Units sold", style = MaterialTheme.typography.labelMedium)
@@ -210,7 +278,7 @@ private fun TopSummary(
             }
 
             if (day != null && day.targetUnits > 0) {
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 val progress = (stats.units.toFloat() / day.targetUnits.toFloat()).coerceIn(0f, 1f)
                 LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
                 val pct = Fmt.targetPct(stats.units, day.targetUnits)
@@ -220,23 +288,22 @@ private fun TopSummary(
                 )
             }
 
-            if (day != null) {
-                Spacer(Modifier.height(4.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
-                    if (lastSale == null) "No sales recorded yet today"
-                    else "Last sale: ${lastSale.productName} • ${Fmt.time(lastSale.timestamp)}",
+                    when {
+                        day == null -> "Tap NEW DAY to begin recording sales."
+                        lastSale == null -> "No sales recorded yet today"
+                        else -> "Last sale: ${lastSale.productName} • ${Fmt.time(lastSale.timestamp)}"
+                    },
                     style = MaterialTheme.typography.labelMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f)
                 )
-            } else {
-                Spacer(Modifier.height(4.dp))
-                Text(
-                    "Tap NEW DAY to begin recording sales.",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+                Text("Confirm taps", style = MaterialTheme.typography.labelSmall)
+                Spacer(Modifier.padding(horizontal = 3.dp))
+                Switch(checked = confirmTaps, onCheckedChange = onConfirmChange)
             }
         }
     }
@@ -266,14 +333,20 @@ private fun ProductCard(
     units: Int,
     revenue: Long,
     enabled: Boolean,
-    onTap: () -> Unit
+    onAdd: () -> Unit,
+    onRemove: () -> Unit
 ) {
+    val stockColor: Color = when {
+        product.stock <= 0 -> negativeColor()
+        product.stock <= 5 -> Color(0xFFEF6C00)
+        else -> Color.Unspecified
+    }
     Card(
-        onClick = onTap,
+        onClick = onAdd,
         enabled = enabled,
         modifier = Modifier
             .fillMaxWidth()
-            .height(150.dp),
+            .height(180.dp),
         colors = CardDefaults.cardColors(
             containerColor = MaterialTheme.colorScheme.primaryContainer,
             contentColor = MaterialTheme.colorScheme.onPrimaryContainer,
@@ -284,7 +357,7 @@ private fun ProductCard(
         Column(
             Modifier
                 .fillMaxSize()
-                .padding(12.dp),
+                .padding(10.dp),
             verticalArrangement = Arrangement.SpaceBetween
         ) {
             Column {
@@ -296,25 +369,37 @@ private fun ProductCard(
                     overflow = TextOverflow.Ellipsis
                 )
                 Text(Fmt.peso(product.priceCentavos), style = MaterialTheme.typography.bodyMedium)
+                Text(
+                    if (product.stock <= 0) "Out of stock (${product.stock})" else "Stock: ${product.stock} left",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = stockColor
+                )
             }
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.Bottom
-            ) {
-                Column {
-                    Text(
-                        units.toString(),
-                        fontSize = 38.sp,
-                        fontWeight = FontWeight.Bold,
-                        lineHeight = 40.sp
-                    )
-                    Text("sold today", style = MaterialTheme.typography.labelSmall)
+            Column {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    StepButton("−", onClick = onRemove, enabled = enabled && units > 0)
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(
+                            units.toString(),
+                            fontSize = 32.sp,
+                            fontWeight = FontWeight.Bold,
+                            lineHeight = 34.sp
+                        )
+                        Text("sold today", style = MaterialTheme.typography.labelSmall)
+                    }
+                    StepButton("+", onClick = onAdd, enabled = enabled)
                 }
                 Text(
                     Fmt.peso(revenue),
-                    style = MaterialTheme.typography.titleSmall,
-                    fontWeight = FontWeight.SemiBold
+                    style = MaterialTheme.typography.labelLarge,
+                    fontWeight = FontWeight.SemiBold,
+                    modifier = Modifier.fillMaxWidth(),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
                 )
             }
         }
@@ -324,8 +409,8 @@ private fun ProductCard(
 @Composable
 private fun BottomBar(
     canUndo: Boolean,
-    highlightNewDay: Boolean,
     onUndo: () -> Unit,
+    onNewOrder: () -> Unit,
     onNewDay: () -> Unit,
     onChart: () -> Unit,
     onCompare: () -> Unit,
@@ -334,42 +419,36 @@ private fun BottomBar(
     Column(
         Modifier
             .fillMaxWidth()
-            .padding(12.dp),
+            .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
+        val pad = PaddingValues(horizontal = 4.dp)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             FilledTonalButton(
                 onClick = onUndo,
                 enabled = canUndo,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(60.dp)
-            ) {
-                Text("UNDO", fontSize = 20.sp, fontWeight = FontWeight.Bold)
-            }
+                modifier = Modifier.weight(1f).height(56.dp),
+                contentPadding = pad
+            ) { Text("UNDO", fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+            Button(
+                onClick = onNewOrder,
+                modifier = Modifier.weight(1.2f).height(56.dp),
+                contentPadding = pad
+            ) { Text("NEW ORDER", fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
             Button(
                 onClick = onNewDay,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(60.dp)
-            ) {
-                Text(
-                    "NEW DAY",
-                    fontSize = 20.sp,
-                    fontWeight = FontWeight.Bold,
-                    maxLines = 1
-                )
-            }
+                modifier = Modifier.weight(1.1f).height(56.dp),
+                contentPadding = pad
+            ) { Text("NEW DAY", fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            val pad = PaddingValues(horizontal = 4.dp)
-            OutlinedButton(onClick = onChart, modifier = Modifier.weight(1f).height(48.dp), contentPadding = pad) {
+            OutlinedButton(onClick = onChart, modifier = Modifier.weight(1f).height(44.dp), contentPadding = pad) {
                 Text("CHART", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
-            OutlinedButton(onClick = onCompare, modifier = Modifier.weight(1f).height(48.dp), contentPadding = pad) {
+            OutlinedButton(onClick = onCompare, modifier = Modifier.weight(1f).height(44.dp), contentPadding = pad) {
                 Text("COMPARE", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
-            OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f).height(48.dp), contentPadding = pad) {
+            OutlinedButton(onClick = onExport, modifier = Modifier.weight(1f).height(44.dp), contentPadding = pad) {
                 Text("EXPORT", fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
             }
         }

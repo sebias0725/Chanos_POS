@@ -20,6 +20,10 @@ import kotlinx.coroutines.launch
 sealed interface Screen {
     data object Main : Screen
     data object Products : Screen
+    data object Orders : Screen
+    data object NewOrder : Screen
+    data object Expenses : Screen
+    data object Rates : Screen
     data object History : Screen
     data class DayDetail(val dayId: Long) : Screen
     data object Chart : Screen
@@ -63,13 +67,21 @@ fun App(vm: MainViewModel) {
                 Screen.Main -> MainScreen(
                     vm = vm,
                     onProducts = { push(Screen.Products) },
+                    onOrders = { push(Screen.Orders) },
+                    onExpenses = { push(Screen.Expenses) },
+                    onRates = { push(Screen.Rates) },
                     onHistory = { push(Screen.History) },
+                    onNewOrder = { push(Screen.NewOrder) },
                     onNewDay = { push(Screen.NewDay) },
                     onChart = { push(Screen.Chart) },
                     onCompare = { push(Screen.Compare) },
                     onOpenDay = { push(Screen.DayDetail(it)) }
                 )
                 Screen.Products -> ProductsScreen(vm, onBack = { pop() })
+                Screen.Orders -> OrdersScreen(vm, onBack = { pop() }, onNewOrder = { push(Screen.NewOrder) })
+                Screen.NewOrder -> NewOrderScreen(vm, onBack = { pop() }, onDone = { pop() })
+                Screen.Expenses -> ExpensesScreen(vm, onBack = { pop() })
+                Screen.Rates -> RatesScreen(vm, onBack = { pop() })
                 Screen.History -> HistoryScreen(vm, onBack = { pop() }, onOpenDay = { push(Screen.DayDetail(it)) })
                 is Screen.DayDetail -> DayDetailScreen(
                     vm = vm,

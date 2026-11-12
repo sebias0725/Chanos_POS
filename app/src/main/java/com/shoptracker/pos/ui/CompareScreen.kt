@@ -15,13 +15,11 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.shoptracker.pos.MainViewModel
 import com.shoptracker.pos.data.BusinessDay
-import com.shoptracker.pos.data.computeStats
 import com.shoptracker.pos.util.Fmt
 
 @Composable
@@ -47,12 +45,10 @@ fun CompareScreen(vm: MainViewModel, onBack: () -> Unit) {
 
 @Composable
 private fun CompareContent(vm: MainViewModel, today: BusinessDay, yesterday: BusinessDay) {
-    val todayFlow = remember(today.id) { vm.txnsFor(today.id) }
-    val yFlow = remember(yesterday.id) { vm.txnsFor(yesterday.id) }
-    val todayTx by todayFlow.collectAsState(initial = emptyList())
-    val yTx by yFlow.collectAsState(initial = emptyList())
-    val t = remember(todayTx) { computeStats(todayTx) }
-    val y = remember(yTx) { computeStats(yTx) }
+    val todayData = rememberDayData(vm, setOf(today.id))
+    val yData = rememberDayData(vm, setOf(yesterday.id))
+    val t = todayData.stats
+    val y = yData.stats
 
     val revDiff = t.gross - y.gross
     val unitDiff = (t.units - y.units).toLong()
@@ -89,6 +85,10 @@ private fun CompareContent(vm: MainViewModel, today: BusinessDay, yesterday: Bus
                     fontWeight = FontWeight.Bold,
                     color = mainColor
                 )
+                Text(
+                    "Total sales include delivery fees.",
+                    style = MaterialTheme.typography.labelSmall
+                )
             }
         }
 
@@ -101,6 +101,24 @@ private fun CompareContent(vm: MainViewModel, today: BusinessDay, yesterday: Bus
                 valueColor = deltaColor(unitDiff),
                 bold = true
             )
+        }
+
+        SectionCard("Delivery fees") {
+            LabelValue("Today", Fmt.peso(t.deliveryFees))
+            LabelValue("Yesterday", Fmt.peso(y.deliveryFees))
+            LabelValue(
+                "Difference",
+                Fmt.signedPeso(t.deliveryFees - y.deliveryFees),
+                valueColor = deltaColor(t.deliveryFees - y.deliveryFees),
+                bold = true
+            )
+        }
+
+        SectionCard("Expenses") {
+            LabelValue("Today", Fmt.peso(todayData.totalExpenses))
+            LabelValue("Yesterday", Fmt.peso(yData.totalExpenses))
+            LabelValue("Net today", Fmt.signedPeso(todayData.net), bold = true)
+            LabelValue("Net yesterday", Fmt.signedPeso(yData.net), bold = true)
         }
 
         SectionCard("Product by product") {

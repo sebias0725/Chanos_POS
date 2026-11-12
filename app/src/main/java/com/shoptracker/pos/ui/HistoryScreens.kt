@@ -34,6 +34,7 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.shoptracker.pos.MainViewModel
 import com.shoptracker.pos.data.BusinessDay
+import com.shoptracker.pos.data.DayStats
 import com.shoptracker.pos.data.STATUS_COMPLETED
 import com.shoptracker.pos.data.computeStats
 import com.shoptracker.pos.data.isOpen
@@ -42,7 +43,14 @@ import com.shoptracker.pos.util.Fmt
 @Composable
 fun HistoryScreen(vm: MainViewModel, onBack: () -> Unit, onOpenDay: (Long) -> Unit) {
     val days by vm.allDays.collectAsState()
-    val totals by vm.dayTotals.collectAsState()
+    val txns by vm.allTxns.collectAsState()
+    val orders by vm.allOrders.collectAsState()
+
+    val totals: Map<Long, DayStats> = remember(days, txns, orders) {
+        val tx = txns.groupBy { it.businessDayId }
+        val od = orders.groupBy { it.businessDayId }
+        days.associate { d -> d.id to computeStats(tx[d.id] ?: emptyList(), od[d.id] ?: emptyList()) }
+    }
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Business day history", onBack)
@@ -74,7 +82,7 @@ fun HistoryScreen(vm: MainViewModel, onBack: () -> Unit, onOpenDay: (Long) -> Un
                                 )
                             }
                             Column(horizontalAlignment = Alignment.End) {
-                                Text(Fmt.peso(tot?.revenue ?: 0L), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Text(Fmt.peso(tot?.gross ?: 0L), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 Text("${tot?.units ?: 0} units", style = MaterialTheme.typography.labelMedium)
                             }
                         }
@@ -107,9 +115,8 @@ fun DayDetailScreen(
 
 @Composable
 private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: () -> Unit) {
-    val flow = remember(day.id) { vm.txnsFor(day.id) }
-    val txns by flow.collectAsState(initial = emptyList())
-    val stats = remember(txns) { computeStats(txns) }
+    val data = rememberDayData(vm, setOf(day.id))
+    val stats = data.stats
     var editFinals by remember { mutableStateOf(false) }
 
     Column(
@@ -127,10 +134,30 @@ private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: ()
 
         SectionCard("Sales") {
             LabelValue("Total units sold", stats.units.toString(), bold = true)
+            LabelValue("Product sales", Fmt.peso(stats.productSales))
+            LabelValue("Delivery fees (${stats.orderCount} order" + (if (stats.orderCount == 1) ")" else "s)"), Fmt.peso(stats.deliveryFees))
             LabelValue("Total gross sales", Fmt.peso(stats.gross), bold = true)
+            LabelValue("Profit from products", Fmt.peso(stats.profit))
             val pct = Fmt.targetPct(stats.units, day.targetUnits)
             LabelValue("Target sales", if (day.targetUnits > 0) "${day.targetUnits} units" else "No target")
             if (pct != null) LabelValue("Target progress", "${pct.toPlainString()}%")
+        }
+
+        SectionCard("Expenses") {
+            if (data.expenses.isEmpty()) {
+                Text("No expenses recorded.", style = MaterialTheme.typography.bodyMedium)
+            } else {
+                data.expenses.forEach { e ->
+                    LabelValue("${e.description} (${Fmt.time(e.createdAt)})", Fmt.peso(e.amountCentavos))
+                }
+            }
+            LabelValue("Total expenses", Fmt.peso(data.totalExpenses), bold = true)
+            LabelValue(
+                "Net (profit + delivery fees - expenses)",
+                Fmt.signedPeso(data.net),
+                valueColor = deltaColor(data.net),
+                bold = true
+            )
         }
 
         SectionCard("Money (physical cash is tracked separately from sales)") {
@@ -158,22 +185,24 @@ private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: ()
             }
         }
 
-        SectionCard("Transactions (${txns.size})") {
-            if (txns.isEmpty()) {
+        SectionCard("Transactions (${data.txns.size})") {
+            if (data.txns.isEmpty()) {
                 Text("No transactions yet.", style = MaterialTheme.typography.bodyMedium)
             } else {
-                txns.asReversed().forEachIndexed { i, t ->
+                data.txns.asReversed().forEachIndexed { i, t ->
                     if (i > 0) HorizontalDivider()
                     val done = t.status == STATUS_COMPLETED
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                t.productName,
+                                (if (t.quantity > 1) "${t.quantity} × " else "") + t.productName,
                                 style = MaterialTheme.typography.bodyMedium,
                                 textDecoration = if (done) TextDecoration.None else TextDecoration.LineThrough
                             )
                             Text(
-                                "#${t.id} • ${Fmt.time(t.timestamp)}" + if (done) "" else " • UNDONE",
+                                "#${t.id} • ${Fmt.time(t.timestamp)}" +
+                                    (if (t.orderId != null) " • order #${t.orderId}" else "") +
+                                    (if (done) "" else " • UNDONE"),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )

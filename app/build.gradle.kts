@@ -13,8 +13,19 @@ android {
         applicationId = "com.shoptracker.pos"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
+    }
+
+    // A fixed signing key (committed with the project) so every build is signed the same way
+    // and a new APK can be installed OVER the old one without uninstalling (keeps your data).
+    signingConfigs {
+        getByName("debug") {
+            storeFile = file("shop-debug.keystore")
+            storePassword = "shoptracker"
+            keyAlias = "shoptracker"
+            keyPassword = "shoptracker"
+        }
     }
 
     buildTypes {

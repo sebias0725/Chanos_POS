@@ -5,7 +5,9 @@ import java.math.RoundingMode
 import java.text.DecimalFormat
 import java.text.DecimalFormatSymbols
 import java.time.Instant
+import java.time.LocalDate
 import java.time.ZoneId
+import java.time.ZoneOffset
 import java.time.format.DateTimeFormatter
 import java.util.Locale
 
@@ -51,10 +53,25 @@ object Fmt {
 
     fun date(millis: Long): String = formatter("EEE, MMM d, yyyy").format(Instant.ofEpochMilli(millis))
     fun shortDate(millis: Long): String = formatter("MMM d, yyyy").format(Instant.ofEpochMilli(millis))
+    fun dayMonth(millis: Long): String = formatter("MMM d").format(Instant.ofEpochMilli(millis))
     fun time(millis: Long): String = formatter("h:mm a").format(Instant.ofEpochMilli(millis))
     fun isoDate(millis: Long): String = formatter("yyyy-MM-dd").format(Instant.ofEpochMilli(millis))
     fun isoTime(millis: Long): String = formatter("HH:mm:ss").format(Instant.ofEpochMilli(millis))
     fun isoDateTime(millis: Long): String = formatter("yyyy-MM-dd HH:mm:ss").format(Instant.ofEpochMilli(millis))
+
+    /** The phone's local calendar date of a timestamp. */
+    fun localDate(millis: Long): LocalDate =
+        Instant.ofEpochMilli(millis).atZone(ZoneId.systemDefault()).toLocalDate()
+
+    fun localDateText(d: LocalDate): String =
+        DateTimeFormatter.ofPattern("MMM d, yyyy", Locale.getDefault()).format(d)
+
+    /** Date-picker millis are UTC midnight of the chosen day. */
+    fun pickerMillisToDate(millis: Long): LocalDate =
+        Instant.ofEpochMilli(millis).atZone(ZoneOffset.UTC).toLocalDate()
+
+    fun dateToPickerMillis(d: LocalDate): Long =
+        d.atStartOfDay(ZoneOffset.UTC).toInstant().toEpochMilli()
 
     /** Percentage change from prev to curr, 2 decimals. Null when prev is zero (undefined). */
     fun growth(curr: Long, prev: Long): BigDecimal? =

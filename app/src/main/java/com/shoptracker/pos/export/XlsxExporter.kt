@@ -1,8 +1,12 @@
 package com.shoptracker.pos.export
 
 import com.shoptracker.pos.data.BusinessDay
+import com.shoptracker.pos.data.Expense
+import com.shoptracker.pos.data.ORDER_DELIVERY
 import com.shoptracker.pos.data.STATUS_COMPLETED
+import com.shoptracker.pos.data.SalesOrder
 import com.shoptracker.pos.data.SalesTransaction
+import com.shoptracker.pos.data.computeStats
 import com.shoptracker.pos.util.Fmt
 import java.io.BufferedOutputStream
 import java.io.OutputStream
@@ -29,12 +33,20 @@ object XlsxExporter {
 
     private class Sheet(val name: String, val widths: List<Double>, val rows: List<List<Cell>>)
 
-    fun write(out: OutputStream, days: List<BusinessDay>, txns: List<SalesTransaction>) {
+    fun write(
+        out: OutputStream,
+        days: List<BusinessDay>,
+        txns: List<SalesTransaction>,
+        orders: List<SalesOrder>,
+        expenses: List<Expense>
+    ) {
         val dayById = days.associateBy { it.id }
         val sheets = listOf(
-            summarySheet(days, txns),
+            summarySheet(days, txns, orders, expenses),
             productSheet(dayById, txns),
-            transactionSheet(dayById, txns)
+            transactionSheet(dayById, txns),
+            orderSheet(dayById, txns, orders),
+            expenseSheet(dayById, expenses)
         )
         ZipOutputStream(BufferedOutputStream(out)).use { zip ->
             put(zip, "[Content_Types].xml", contentTypes(sheets.size))
@@ -52,22 +64,38 @@ object XlsxExporter {
 
     private fun money(c: Long?): Cell = if (c == null) Cell.Empty else Cell.Num(Fmt.plain(c), S_CURRENCY)
 
-    private fun summarySheet(days: List<BusinessDay>, txns: List<SalesTransaction>): Sheet {
+    private fun dateOf(day: BusinessDay?): String = if (day != null) Fmt.isoDate(day.openedAt) else ""
+
+    private fun summarySheet(
+        days: List<BusinessDay>,
+        txns: List<SalesTransaction>,
+        orders: List<SalesOrder>,
+        expenses: List<Expense>
+    ): Sheet {
         val rows = mutableListOf<List<Cell>>()
         rows += header(
-            "Business Date", "Total Units Sold", "Total Gross Sales", "Opening Floating Money",
-            "Opening Cash on Hand", "Final Floating Money", "Final Cash on Hand", "Target Sales (units)",
-            "Target Achievement %", "Opened At", "Closed At"
+            "Business Date", "Total Units Sold", "Product Sales", "Delivery Fees", "Total Gross Sales",
+            "Profit (products)", "Total Expenses", "Net (profit + delivery fees - expenses)",
+            "Opening Floating Money", "Opening Cash on Hand", "Final Floating Money", "Final Cash on Hand",
+            "Target Sales (units)", "Target Achievement %", "Opened At", "Closed At"
         )
         for (d in days) {
-            val done = txns.filter { it.businessDayId == d.id && it.status == STATUS_COMPLETED }
-            val units = done.sumOf { it.quantity }
-            val gross = done.sumOf { it.totalCentavos }
-            val frac = Fmt.targetFraction(units, d.targetUnits)
+            val stats = computeStats(
+                txns.filter { it.businessDayId == d.id },
+                orders.filter { it.businessDayId == d.id }
+            )
+            val expenseTotal = expenses.filter { it.businessDayId == d.id }.sumOf { it.amountCentavos }
+            val net = stats.profit + stats.deliveryFees - expenseTotal
+            val frac = Fmt.targetFraction(stats.units, d.targetUnits)
             rows += listOf(
                 Cell.Text(Fmt.isoDate(d.openedAt)),
-                Cell.Num(units.toString(), S_INT),
-                money(gross),
+                Cell.Num(stats.units.toString(), S_INT),
+                money(stats.productSales),
+                money(stats.deliveryFees),
+                money(stats.gross),
+                money(stats.profit),
+                money(expenseTotal),
+                money(net),
                 money(d.openingFloatCentavos),
                 money(d.openingCashCentavos),
                 money(d.finalFloatCentavos),
@@ -78,12 +106,16 @@ object XlsxExporter {
                 if (d.closedAt == null) Cell.Text("Still open") else Cell.Text(Fmt.isoDateTime(d.closedAt))
             )
         }
-        return Sheet("Daily Summary", listOf(15.0, 16.0, 18.0, 22.0, 20.0, 20.0, 19.0, 18.0, 20.0, 20.0, 20.0), rows)
+        return Sheet(
+            "Daily Summary",
+            listOf(15.0, 16.0, 16.0, 15.0, 18.0, 17.0, 16.0, 26.0, 22.0, 20.0, 20.0, 19.0, 18.0, 20.0, 20.0, 20.0),
+            rows
+        )
     }
 
     private fun productSheet(dayById: Map<Long, BusinessDay>, txns: List<SalesTransaction>): Sheet {
         val rows = mutableListOf<List<Cell>>()
-        rows += header("Business Date", "Product Name", "Selling Price", "Quantity Sold", "Total Revenue")
+        rows += header("Business Date", "Product Name", "Selling Price", "Quantity Sold", "Total Revenue", "Total Profit")
         val grouped = txns.filter { it.status == STATUS_COMPLETED }
             .groupBy { Triple(it.businessDayId, it.productName, it.unitPriceCentavos) }
         val keys = grouped.keys.sortedWith(
@@ -91,26 +123,26 @@ object XlsxExporter {
         )
         for (k in keys) {
             val list = grouped.getValue(k)
-            val day = dayById[k.first]
             rows += listOf(
-                Cell.Text(if (day != null) Fmt.isoDate(day.openedAt) else ""),
+                Cell.Text(dateOf(dayById[k.first])),
                 Cell.Text(k.second),
                 money(k.third),
                 Cell.Num(list.sumOf { it.quantity }.toString(), S_INT),
-                money(list.sumOf { it.totalCentavos })
+                money(list.sumOf { it.totalCentavos }),
+                money(list.sumOf { it.unitProfitCentavos * it.quantity })
             )
         }
-        return Sheet("Product Sales", listOf(15.0, 30.0, 16.0, 16.0, 18.0), rows)
+        return Sheet("Product Sales", listOf(15.0, 30.0, 16.0, 16.0, 18.0, 16.0), rows)
     }
 
     private fun transactionSheet(dayById: Map<Long, BusinessDay>, txns: List<SalesTransaction>): Sheet {
         val rows = mutableListOf<List<Cell>>()
         rows += header(
             "Transaction ID", "Date", "Time", "Product Name", "Quantity", "Unit Price",
-            "Total Amount", "Status", "Business Date"
+            "Total Amount", "Status", "Business Date", "Order ID"
         )
         for (t in txns) {
-            val day = dayById[t.businessDayId]
+            val orderId = t.orderId
             rows += listOf(
                 Cell.Num(t.id.toString(), S_INT),
                 Cell.Text(Fmt.isoDate(t.timestamp)),
@@ -120,10 +152,60 @@ object XlsxExporter {
                 money(t.unitPriceCentavos),
                 money(t.totalCentavos),
                 Cell.Text(if (t.status == STATUS_COMPLETED) "Completed" else "Undone"),
-                Cell.Text(if (day != null) Fmt.isoDate(day.openedAt) else "")
+                Cell.Text(dateOf(dayById[t.businessDayId])),
+                if (orderId == null) Cell.Empty else Cell.Num(orderId.toString(), S_INT)
             )
         }
-        return Sheet("Transaction History", listOf(15.0, 13.0, 11.0, 30.0, 10.0, 14.0, 16.0, 12.0, 15.0), rows)
+        return Sheet("Transaction History", listOf(15.0, 13.0, 11.0, 30.0, 10.0, 14.0, 16.0, 12.0, 15.0, 10.0), rows)
+    }
+
+    private fun orderSheet(
+        dayById: Map<Long, BusinessDay>,
+        txns: List<SalesTransaction>,
+        orders: List<SalesOrder>
+    ): Sheet {
+        val rows = mutableListOf<List<Cell>>()
+        rows += header(
+            "Order ID", "Business Date", "Date", "Time", "Customer", "Type", "Address / Area",
+            "Items", "Items Total", "Delivery Fee", "Order Total", "Status", "Note"
+        )
+        val byOrder = txns.filter { it.orderId != null }.groupBy { it.orderId }
+        for (o in orders) {
+            val lines = byOrder[o.id] ?: emptyList()
+            val itemsTotal = lines.sumOf { it.totalCentavos }
+            val itemsText = lines.joinToString("; ") { "${it.quantity} x ${it.productName}" }
+            rows += listOf(
+                Cell.Num(o.id.toString(), S_INT),
+                Cell.Text(dateOf(dayById[o.businessDayId])),
+                Cell.Text(Fmt.isoDate(o.createdAt)),
+                Cell.Text(Fmt.isoTime(o.createdAt)),
+                Cell.Text(o.customerName),
+                Cell.Text(if (o.type == ORDER_DELIVERY) "Delivery" else "Pickup"),
+                Cell.Text(o.address),
+                Cell.Text(itemsText),
+                money(itemsTotal),
+                money(o.deliveryFeeCentavos),
+                money(itemsTotal + o.deliveryFeeCentavos),
+                Cell.Text(if (o.status == STATUS_COMPLETED) "Completed" else "Cancelled"),
+                Cell.Text(o.note)
+            )
+        }
+        return Sheet("Orders", listOf(10.0, 15.0, 13.0, 11.0, 22.0, 11.0, 28.0, 40.0, 14.0, 14.0, 15.0, 12.0, 30.0), rows)
+    }
+
+    private fun expenseSheet(dayById: Map<Long, BusinessDay>, expenses: List<Expense>): Sheet {
+        val rows = mutableListOf<List<Cell>>()
+        rows += header("Business Date", "Date", "Time", "Description", "Amount")
+        for (e in expenses) {
+            rows += listOf(
+                Cell.Text(dateOf(dayById[e.businessDayId])),
+                Cell.Text(Fmt.isoDate(e.createdAt)),
+                Cell.Text(Fmt.isoTime(e.createdAt)),
+                Cell.Text(e.description),
+                money(e.amountCentavos)
+            )
+        }
+        return Sheet("Expenses", listOf(15.0, 13.0, 11.0, 40.0, 16.0), rows)
     }
 
     // ---------- xml ----------

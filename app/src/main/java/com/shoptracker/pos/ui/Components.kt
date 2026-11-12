@@ -5,18 +5,21 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -30,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 
 @Composable
 fun ScreenHeader(
@@ -95,7 +99,12 @@ fun SectionCard(
 @Composable
 fun LabelValue(label: String, value: String, valueColor: Color = Color.Unspecified, bold: Boolean = false) {
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-        Text(label, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(
+            label,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(1f)
+        )
         Text(
             value,
             style = MaterialTheme.typography.bodyMedium,
@@ -153,4 +162,48 @@ fun MoneyField(
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal),
         modifier = modifier.fillMaxWidth()
     )
+}
+
+/** Whole-number field (digits only). */
+@Composable
+fun NumberField(
+    value: String,
+    onChange: (String) -> Unit,
+    label: String,
+    modifier: Modifier = Modifier,
+    error: String? = null,
+    hint: String? = null
+) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = { v -> if (v.length <= 6 && v.all { it.isDigit() }) onChange(v) },
+        label = { Text(label) },
+        singleLine = true,
+        isError = error != null,
+        supportingText = when {
+            error != null -> ({ Text(error) })
+            hint != null -> ({ Text(hint) })
+            else -> null
+        },
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = modifier.fillMaxWidth()
+    )
+}
+
+/** Small square +/- style button. */
+@Composable
+fun StepButton(
+    label: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true
+) {
+    FilledTonalButton(
+        onClick = onClick,
+        enabled = enabled,
+        modifier = modifier.size(46.dp),
+        contentPadding = PaddingValues(0.dp)
+    ) {
+        Text(label, fontSize = 22.sp, fontWeight = FontWeight.Bold)
+    }
 }
