@@ -8,8 +8,16 @@ import androidx.lifecycle.viewModelScope
 import androidx.room.withTransaction
 import com.shoptracker.pos.data.AppDatabase
 import com.shoptracker.pos.data.BusinessDay
+import com.shoptracker.pos.data.CATEGORY_NAME_MAX
+import com.shoptracker.pos.data.Category
+import com.shoptracker.pos.data.CategoryResult
+import com.shoptracker.pos.data.CategoryTarget
+import com.shoptracker.pos.data.cleanCategoryName
+import com.shoptracker.pos.data.isOpen
+import com.shoptracker.pos.data.finalFloatFrom
 import com.shoptracker.pos.data.DeliveryRate
 import com.shoptracker.pos.data.ExportScope
+import com.shoptracker.pos.data.Waste
 import com.shoptracker.pos.data.Expense
 import com.shoptracker.pos.data.ORDER_DELIVERY
 import com.shoptracker.pos.data.Product
@@ -44,6 +52,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val orderDao = db.orderDao()
     private val expenseDao = db.expenseDao()
     private val rateDao = db.rateDao()
+    private val categoryDao = db.categoryDao()
+    private val wasteDao = db.wasteDao()
 
     private val prefs = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val _confirmTaps = MutableStateFlow(prefs.getBoolean("confirm_taps", true))
@@ -58,6 +68,10 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val products: StateFlow<List<Product>> =
         productDao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Alphabetical (case-insensitive). */
+    val categories: StateFlow<List<Category>> =
+        categoryDao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     val openDay: StateFlow<BusinessDay?> =
         dayDao.observeOpen().stateIn(viewModelScope, SharingStarted.Eagerly, null)
@@ -78,6 +92,43 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     val allExpenses: StateFlow<List<Expense>> =
         expenseDao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    val wastes: StateFlow<List<Waste>> =
+        wasteDao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun recordWaste(productId: Long, quantity: Int, reason: String, note: String) {
+        viewModelScope.launch {
+            try {
+                val saved = db.withTransaction {
+                    val day = dayDao.getOpen() ?: return@withTransaction false
+                    val product = productDao.getById(productId) ?: return@withTransaction false
+                    if (quantity <= 0 || quantity > product.stock) return@withTransaction false
+                    wasteDao.insert(Waste(businessDayId = day.id, productId = product.id,
+                        productName = product.name, quantity = quantity,
+                        unitValueCentavos = product.priceCentavos, reason = reason,
+                        note = note.trim(), createdAt = System.currentTimeMillis()))
+                    productDao.adjustStock(product.id, -quantity)
+                    true
+                }
+                say(if (saved) "Waste recorded" else "Check active day, product and available stock")
+            } catch (e: Exception) { say("Could not record waste: ${e.message}") }
+        }
+    }
+
+    fun removeWaste(id: Long) {
+        viewModelScope.launch {
+            try {
+                val ok = db.withTransaction {
+                    val waste = wasteDao.getById(id) ?: return@withTransaction false
+                    if (dayDao.getById(waste.businessDayId)?.isOpen != true) return@withTransaction false
+                    productDao.adjustStock(waste.productId, waste.quantity)
+                    wasteDao.deleteById(id)
+                    true
+                }
+                say(if (ok) "Waste removed and stock restored" else "Only current-day wastes can be removed")
+            } catch (e: Exception) { say("Could not remove waste: ${e.message}") }
+        }
+    }
 
     val rates: StateFlow<List<DeliveryRate>> =
         rateDao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
@@ -194,6 +245,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         deliveryFeeCentavos: Long,
         note: String,
         items: List<Pair<Long, Int>>,
+        paymentMethod: String,
+        deliveryTime: String,
         onResult: (Boolean) -> Unit
     ) {
         viewModelScope.launch {
@@ -212,7 +265,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             address = address.trim(),
                             deliveryFeeCentavos = if (type == ORDER_DELIVERY) deliveryFeeCentavos else 0L,
                             note = note.trim(),
-                            createdAt = now
+                            createdAt = now,
+                            paymentMethod = paymentMethod,
+                            deliveryTime = if (type == ORDER_DELIVERY) deliveryTime else ""
                         )
                     )
                     var inserted = 0
@@ -242,6 +297,41 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 say("Could not save order: ${e.message}")
             }
             onResult(ok)
+        }
+    }
+
+    /** Edits the preferred delivery time of an existing delivery order (allowed at any time). */
+    fun updateDeliveryTime(orderId: Long, time: String) {
+        viewModelScope.launch {
+            try {
+                val order = orderDao.getById(orderId)
+                if (order == null || order.type != ORDER_DELIVERY) {
+                    say("Only delivery orders have a delivery time")
+                } else {
+                    orderDao.setDeliveryTime(orderId, time)
+                    say("Order #$orderId delivery time: ${time.ifBlank { "not recorded" }}")
+                }
+            } catch (e: Exception) {
+                say("Could not update delivery time: ${e.message}")
+            }
+        }
+    }
+
+    fun setOrderPaid(orderId: Long, paid: Boolean) {
+        viewModelScope.launch {
+            try {
+                if (orderDao.setPaid(orderId, paid) == 0) say("Cannot update cancelled order")
+                else say(if (paid) "Marked paid" else "Marked unpaid")
+            } catch (e: Exception) { say("Payment update failed: ${e.message}") }
+        }
+    }
+
+    fun setOrderDelivered(orderId: Long, delivered: Boolean) {
+        viewModelScope.launch {
+            try {
+                if (orderDao.setDelivered(orderId, delivered) == 0) say("Cannot update cancelled order")
+                else say(if (delivered) "Marked delivered" else "Marked not delivered")
+            } catch (e: Exception) { say("Delivery update failed: ${e.message}") }
         }
     }
 
@@ -381,7 +471,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun closeDay(dayId: Long, finalFloat: Long, finalCash: Long, onResult: (Boolean) -> Unit) {
+    /** Closes the day. Final floating money is derived: Cash on Hand - Remit. */
+    fun closeDay(dayId: Long, finalCash: Long, remit: Long, onResult: (Boolean) -> Unit) {
         viewModelScope.launch {
             var ok = false
             try {
@@ -393,8 +484,9 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         dayDao.update(
                             day.copy(
                                 closedAt = System.currentTimeMillis(),
-                                finalFloatCentavos = finalFloat,
-                                finalCashCentavos = finalCash
+                                finalFloatCentavos = finalFloatFrom(finalCash, remit),
+                                finalCashCentavos = finalCash,
+                                remitCentavos = remit
                             )
                         )
                         true
@@ -408,14 +500,23 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun updateFinals(dayId: Long, finalFloat: Long, finalCash: Long) {
+    /** Edits finals of a closed day. If the day has a remit, floating money is recomputed from it. */
+    fun updateFinals(dayId: Long, finalFloat: Long, finalCash: Long, remit: Long? = null) {
         viewModelScope.launch {
             try {
                 db.withTransaction {
                     val day = dayDao.getById(dayId)
                     if (day != null && day.closedAt != null) {
                         dayDao.update(
-                            day.copy(finalFloatCentavos = finalFloat, finalCashCentavos = finalCash)
+                            if (day.remitCentavos != null && remit != null) {
+                                day.copy(
+                                    finalFloatCentavos = finalFloatFrom(finalCash, remit),
+                                    finalCashCentavos = finalCash,
+                                    remitCentavos = remit
+                                )
+                            } else {
+                                day.copy(finalFloatCentavos = finalFloat, finalCashCentavos = finalCash)
+                            }
                         )
                     }
                 }
@@ -428,7 +529,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---------------- products ----------------
 
-    fun addProduct(name: String, priceCentavos: Long, profitCentavos: Long, stock: Int) {
+    fun addProduct(name: String, priceCentavos: Long, profitCentavos: Long, stock: Int, categoryId: Long? = null) {
         viewModelScope.launch {
             try {
                 productDao.insert(
@@ -436,7 +537,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                         name = name.trim(),
                         priceCentavos = priceCentavos,
                         profitCentavos = profitCentavos,
-                        stock = stock
+                        stock = stock,
+                        categoryId = validCategoryId(categoryId)
                     )
                 )
             } catch (e: Exception) {
@@ -448,7 +550,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun updateProduct(product: Product) {
         viewModelScope.launch {
             try {
-                productDao.update(product)
+                productDao.update(product.copy(categoryId = validCategoryId(product.categoryId)))
             } catch (e: Exception) {
                 say("Could not update product: ${e.message}")
             }
@@ -464,6 +566,113 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             } catch (e: Exception) {
                 say("Could not delete product: ${e.message}")
             }
+        }
+    }
+
+    // ---------------- categories ----------------
+
+    /** A category id that no longer exists is stored as null (Uncategorized), never as a dangling id. */
+    private suspend fun validCategoryId(id: Long?): Long? =
+        if (id != null && categoryDao.getById(id) != null) id else null
+
+    /** Returns an error message, or null when [name] is acceptable. Must run inside a transaction. */
+    private suspend fun categoryNameError(name: String, ignoreId: Long?): String? {
+        if (name.isEmpty()) return "Enter a category name"
+        if (name.length > CATEGORY_NAME_MAX) return "Category name is too long (max $CATEGORY_NAME_MAX)"
+        if (name.equals("Uncategorized", ignoreCase = true)) return "\"Uncategorized\" is reserved for products with no category"
+        val clash = categoryDao.findByName(name)
+        if (clash != null && clash.id != ignoreId) return "A category named \"${clash.name}\" already exists"
+        return null
+    }
+
+    fun addCategory(rawName: String, onResult: (CategoryResult) -> Unit = {}) {
+        viewModelScope.launch {
+            val result = try {
+                db.withTransaction {
+                    val name = cleanCategoryName(rawName)
+                    val err = categoryNameError(name, null)
+                    if (err != null) {
+                        CategoryResult.Error(err)
+                    } else {
+                        categoryDao.insert(Category(name = name))
+                        CategoryResult.Ok
+                    }
+                }
+            } catch (e: Exception) {
+                CategoryResult.Error("Could not add category: ${e.message}")
+            }
+            onResult(result)
+        }
+    }
+
+    fun renameCategory(id: Long, rawName: String, onResult: (CategoryResult) -> Unit = {}) {
+        viewModelScope.launch {
+            val result = try {
+                db.withTransaction {
+                    val existing = categoryDao.getById(id)
+                    val name = cleanCategoryName(rawName)
+                    if (existing == null) {
+                        CategoryResult.Error("That category no longer exists")
+                    } else {
+                        val err = categoryNameError(name, id)
+                        if (err != null) {
+                            CategoryResult.Error(err)
+                        } else {
+                            categoryDao.update(existing.copy(name = name))
+                            CategoryResult.Ok
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                CategoryResult.Error("Could not rename category: ${e.message}")
+            }
+            onResult(result)
+        }
+    }
+
+    /**
+     * Deletes a category. If it still contains products, [moveTo] is REQUIRED: the products are
+     * moved first and the category is deleted only afterwards, in one transaction (all or nothing).
+     * Without a target the delete is refused, so products can never be orphaned by accident.
+     * Products are never deleted by this function.
+     */
+    fun deleteCategory(id: Long, moveTo: CategoryTarget? = null, onResult: (CategoryResult) -> Unit = {}) {
+        viewModelScope.launch {
+            val result = try {
+                db.withTransaction {
+                    val cat = categoryDao.getById(id)
+                    if (cat == null) {
+                        CategoryResult.Error("That category no longer exists")
+                    } else {
+                        val inside = productDao.countInCategory(id)
+                        val targetId: Long? = when (moveTo) {
+                            null -> null
+                            CategoryTarget.Uncategorized -> null
+                            is CategoryTarget.To -> moveTo.categoryId
+                        }
+                        when {
+                            inside > 0 && moveTo == null ->
+                                CategoryResult.Error(
+                                    "\"${cat.name}\" still has $inside product${if (inside == 1) "" else "s"}. " +
+                                        "Choose where to move them first."
+                                )
+                            moveTo is CategoryTarget.To && moveTo.categoryId == id ->
+                                CategoryResult.Error("Choose a different category to move the products to")
+                            moveTo is CategoryTarget.To && categoryDao.getById(moveTo.categoryId) == null ->
+                                CategoryResult.Error("The category to move products to no longer exists")
+                            else -> {
+                                if (inside > 0) productDao.moveCategory(id, targetId)
+                                categoryDao.deleteById(id)
+                                CategoryResult.Ok
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                CategoryResult.Error("Could not delete category: ${e.message}")
+            }
+            if (result is CategoryResult.Ok) say("Category deleted")
+            onResult(result)
         }
     }
 

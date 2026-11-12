@@ -37,6 +37,7 @@ import com.shoptracker.pos.data.BusinessDay
 import com.shoptracker.pos.data.DayStats
 import com.shoptracker.pos.data.STATUS_COMPLETED
 import com.shoptracker.pos.data.computeStats
+import com.shoptracker.pos.data.finalFloatFrom
 import com.shoptracker.pos.data.isOpen
 import com.shoptracker.pos.util.Fmt
 
@@ -165,6 +166,7 @@ private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: ()
             LabelValue("Opening cash on hand", Fmt.peso(day.openingCashCentavos))
             LabelValue("Final floating money", day.finalFloatCentavos?.let { Fmt.peso(it) } ?: "Not entered yet")
             LabelValue("Final cash on hand", day.finalCashCentavos?.let { Fmt.peso(it) } ?: "Not entered yet")
+            day.remitCentavos?.let { LabelValue("Remit", Fmt.peso(it)) }
         }
 
         if (day.isOpen) {
@@ -222,8 +224,8 @@ private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: ()
         EditFinalsDialog(
             day = day,
             onDismiss = { editFinals = false },
-            onSave = { f, c ->
-                vm.updateFinals(day.id, f, c)
+            onSave = { f, c, r ->
+                vm.updateFinals(day.id, f, c, r)
                 editFinals = false
             }
         )
@@ -231,25 +233,40 @@ private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: ()
 }
 
 @Composable
-private fun EditFinalsDialog(day: BusinessDay, onDismiss: () -> Unit, onSave: (Long, Long) -> Unit) {
+private fun EditFinalsDialog(day: BusinessDay, onDismiss: () -> Unit, onSave: (Long, Long, Long?) -> Unit) {
     var f by remember { mutableStateOf(day.finalFloatCentavos?.let { Fmt.plain(it) } ?: "") }
     var c by remember { mutableStateOf(day.finalCashCentavos?.let { Fmt.plain(it) } ?: "") }
+    var r by remember { mutableStateOf(day.remitCentavos?.let { Fmt.plain(it) } ?: "") }
     var showErrors by remember { mutableStateOf(false) }
-    val fc = Fmt.parsePeso(f)
+    // Days closed with a remit keep floating = cash - remit; older days keep the manual entry.
+    val hasRemit = day.remitCentavos != null
+    val rc = Fmt.parsePeso(r)
     val cc = Fmt.parsePeso(c)
+    val fc = if (hasRemit) { if (cc != null && rc != null) finalFloatFrom(cc, rc) else null } else Fmt.parsePeso(f)
+    val remitTooHigh = hasRemit && fc != null && fc < 0
 
     AlertDialog(
         onDismissRequest = onDismiss,
         title = { Text("Final amounts") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                MoneyField(f, { f = it }, "Final floating money", error = if (showErrors && fc == null) "Enter an amount" else null)
-                MoneyField(c, { c = it }, "Final cash on hand", error = if (showErrors && cc == null) "Enter an amount" else null)
+                if (hasRemit) {
+                    MoneyField(c, { c = it }, "Final cash on hand", error = if (showErrors && cc == null) "Enter an amount" else null)
+                    MoneyField(
+                        r, { r = it }, "Remit",
+                        error = if (showErrors && rc == null) "Enter an amount" else if (remitTooHigh) "Remit cannot be more than cash on hand" else null
+                    )
+                    LabelValue("Final floating money", if (fc != null && !remitTooHigh) Fmt.peso(fc) else "-", bold = true)
+                } else {
+                    MoneyField(f, { f = it }, "Final floating money", error = if (showErrors && fc == null) "Enter an amount" else null)
+                    MoneyField(c, { c = it }, "Final cash on hand", error = if (showErrors && cc == null) "Enter an amount" else null)
+                }
             }
         },
         confirmButton = {
             TextButton(onClick = {
-                if (fc == null || cc == null) showErrors = true else onSave(fc, cc)
+                if (fc == null || cc == null || remitTooHigh || (hasRemit && rc == null)) showErrors = true
+                else onSave(fc, cc, if (hasRemit) rc else null)
             }) { Text("Save") }
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }

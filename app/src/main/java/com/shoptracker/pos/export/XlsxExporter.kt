@@ -77,7 +77,7 @@ object XlsxExporter {
             "Business Date", "Total Units Sold", "Product Sales", "Delivery Fees", "Total Gross Sales",
             "Profit (products)", "Total Expenses", "Net (profit + delivery fees - expenses)",
             "Opening Floating Money", "Opening Cash on Hand", "Final Floating Money", "Final Cash on Hand",
-            "Target Sales (units)", "Target Achievement %", "Opened At", "Closed At"
+            "Target Sales (units)", "Target Achievement %", "Opened At", "Closed At", "Remit"
         )
         for (d in days) {
             val stats = computeStats(
@@ -103,12 +103,13 @@ object XlsxExporter {
                 Cell.Num(d.targetUnits.toString(), S_INT),
                 if (frac == null) Cell.Empty else Cell.Num(frac, S_PERCENT),
                 Cell.Text(Fmt.isoDateTime(d.openedAt)),
-                if (d.closedAt == null) Cell.Text("Still open") else Cell.Text(Fmt.isoDateTime(d.closedAt))
+                if (d.closedAt == null) Cell.Text("Still open") else Cell.Text(Fmt.isoDateTime(d.closedAt)),
+                if (d.remitCentavos == null) Cell.Empty else money(d.remitCentavos)
             )
         }
         return Sheet(
             "Daily Summary",
-            listOf(15.0, 16.0, 16.0, 15.0, 18.0, 17.0, 16.0, 26.0, 22.0, 20.0, 20.0, 19.0, 18.0, 20.0, 20.0, 20.0),
+            listOf(15.0, 16.0, 16.0, 15.0, 18.0, 17.0, 16.0, 26.0, 22.0, 20.0, 20.0, 19.0, 18.0, 20.0, 20.0, 20.0, 14.0),
             rows
         )
     }
@@ -167,7 +168,8 @@ object XlsxExporter {
         val rows = mutableListOf<List<Cell>>()
         rows += header(
             "Order ID", "Business Date", "Date", "Time", "Customer", "Type", "Address / Area",
-            "Items", "Items Total", "Delivery Fee", "Order Total", "Status", "Note"
+            "Items", "Items Total", "Delivery Fee", "Order Total", "Status", "Note",
+            "Payment Method", "Delivery Time"
         )
         val byOrder = txns.filter { it.orderId != null }.groupBy { it.orderId }
         for (o in orders) {
@@ -187,10 +189,12 @@ object XlsxExporter {
                 money(o.deliveryFeeCentavos),
                 money(itemsTotal + o.deliveryFeeCentavos),
                 Cell.Text(if (o.status == STATUS_COMPLETED) "Completed" else "Cancelled"),
-                Cell.Text(o.note)
+                Cell.Text(o.note),
+                Cell.Text(o.paymentMethod),
+                Cell.Text(o.deliveryTime)
             )
         }
-        return Sheet("Orders", listOf(10.0, 15.0, 13.0, 11.0, 22.0, 11.0, 28.0, 40.0, 14.0, 14.0, 15.0, 12.0, 30.0), rows)
+        return Sheet("Orders", listOf(10.0, 15.0, 13.0, 11.0, 22.0, 11.0, 28.0, 40.0, 14.0, 14.0, 15.0, 12.0, 30.0, 16.0, 22.0), rows)
     }
 
     private fun expenseSheet(dayById: Map<Long, BusinessDay>, expenses: List<Expense>): Sheet {

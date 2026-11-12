@@ -13,8 +13,8 @@ android {
         applicationId = "com.shoptracker.pos"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 4
+        versionName = "1.7.1"
     }
 
     // A fixed signing key (committed with the project) so every build is signed the same way

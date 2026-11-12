@@ -14,9 +14,11 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SalesTransaction::class,
         SalesOrder::class,
         Expense::class,
-        DeliveryRate::class
+        DeliveryRate::class,
+        Category::class,
+        Waste::class
     ],
-    version = 2,
+    version = 8,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -26,6 +28,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun orderDao(): OrderDao
     abstract fun expenseDao(): ExpenseDao
     abstract fun rateDao(): RateDao
+    abstract fun categoryDao(): CategoryDao
+    abstract fun wasteDao(): WasteDao
 
     companion object {
         @Volatile
@@ -71,13 +75,148 @@ abstract class AppDatabase : RoomDatabase() {
             }
         }
 
+        /** v2 -> v3: adds nullable remit to business days. Existing rows keep NULL (unchanged). */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE business_days ADD COLUMN remitCentavos INTEGER")
+            }
+        }
+
+        /**
+         * v3 -> v4: adds categories. Products get a NULL categoryId, which means "Uncategorized",
+         * so every existing product keeps all of its data and stays visible and sellable.
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS categories (" +
+                        "id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, " +
+                        "name TEXT NOT NULL, " +
+                        "createdAt INTEGER NOT NULL)"
+                )
+                db.execSQL("ALTER TABLE products ADD COLUMN categoryId INTEGER")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_products_categoryId ON products (categoryId)")
+            }
+        }
+
+        /**
+         * Starter Delivery Rates: one line per rate, "name|fee in centavos|note". Used both when a
+         * brand-new database is created and by MIGRATION_4_5. Seeding NEVER overwrites or removes
+         * anything: a rate is only inserted if no rate with the same name already exists.
+         * (Bacong / Valencia are quoted as a ₱80–₱90 range: the lower fee is stored and the range is
+         * in the note, so the exact fee can be typed on the order.)
+         */
+        val DEFAULT_RATES: List<String> = listOf(
+            "Bagacay, Dumaguete|5000|",
+            "Bajumpandan, Dumaguete|7000|",
+            "Balugo, Dumaguete|7000|",
+            "Banilad, Dumaguete|6000|",
+            "Bantayan, Dumaguete|4000|",
+            "Batinguel, Dumaguete|6000|",
+            "Bunao, Dumaguete|4000|",
+            "Cadawinonan, Dumaguete|6000|",
+            "Calindagan, Dumaguete|4000|",
+            "Camancjac, Dumaguete|7000|",
+            "Candau-ay, Dumaguete|7000|",
+            "Cantil-e, Dumaguete|7000|",
+            "Daro, Dumaguete|4000|",
+            "Junob, Dumaguete|5000|",
+            "Looc, Dumaguete|4000|",
+            "Mangnao-Canal, Dumaguete|6000|",
+            "Motong, Dumaguete|4000|",
+            "Piapi, Dumaguete|4000|",
+            "Poblacion No. 1 (Tinago), Dumaguete|4000|",
+            "Poblacion No. 2 (Upper Luke Wright), Dumaguete|4000|",
+            "Poblacion No. 3 (Colon Extension), Dumaguete|4000|",
+            "Poblacion No. 4 (Boulevard area), Dumaguete|4000|",
+            "Poblacion No. 5 (Silliman Area), Dumaguete|4000|",
+            "Poblacion No. 6 (Cambagroy), Dumaguete|4000|",
+            "Poblacion No. 7 (Mangga), Dumaguete|4000|",
+            "Poblacion No. 8 (Cervantes), Dumaguete|4000|",
+            "Pulantubig, Dumaguete|4000|",
+            "Tabuctubig, Dumaguete|5000|",
+            "Taclobo, Dumaguete|5000|",
+            "Talay, Dumaguete|7000|",
+            "Cangmating, Sibulan|4000|",
+            "Calabnugan, Sibulan|10000|",
+            "Looc, Sibulan|6000|",
+            "Maslog, Sibulan|4000|",
+            "Bolocboloc, Sibulan|4000|",
+            "Agan-an, Sibulan|4000|",
+            "Balugo, Sibulan|10000|",
+            "Poblacion, Sibulan|4000|",
+            "Tubtubon, Sibulan|5000|",
+            "Magatas, Sibulan|5000|",
+            "Tubigon, Sibulan|10000|",
+            "San Antonio, Sibulan|10000|",
+            "Maningcao, Sibulan|10000|",
+            "Ajong, Sibulan|7000|",
+            "Enrique Villanueva, Sibulan|10000|",
+            "Bacong|8000|Rate range ₱80.00–₱90.00",
+            "Valencia Area|8000|Rate range ₱80.00–₱90.00"
+        )
+
+        /**
+         * v5 -> v6: orders get a payment method and a preferred delivery time. Both default to ''
+         * ("not recorded"), so every existing order keeps all of its data and totals unchanged.
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS wastes (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, businessDayId INTEGER NOT NULL, productId INTEGER NOT NULL, productName TEXT NOT NULL, quantity INTEGER NOT NULL, unitValueCentavos INTEGER NOT NULL, reason TEXT NOT NULL, note TEXT NOT NULL, createdAt INTEGER NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS index_wastes_businessDayId ON wastes (businessDayId)")
+            }
+        }
+
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE orders ADD COLUMN paid INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE orders ADD COLUMN delivered INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE orders ADD COLUMN paymentMethod TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE orders ADD COLUMN deliveryTime TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
+        private fun seedDefaultRates(db: SupportSQLiteDatabase) {
+            for (line in DEFAULT_RATES) {
+                val (name, fee, note) = line.split("|")
+                db.execSQL(
+                    "INSERT INTO delivery_rates (name, feeCentavos, note) SELECT ?, ?, ? " +
+                        "WHERE NOT EXISTS (SELECT 1 FROM delivery_rates WHERE name = ? COLLATE NOCASE)",
+                    arrayOf<Any>(name, fee.toLong(), note, name)
+                )
+            }
+        }
+
+        /**
+         * v4 -> v5: no table changes. Pre-fills the Delivery Rates list. Existing rates and all
+         * orders (which store their own delivery fee) are left untouched.
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                seedDefaultRates(db)
+            }
+        }
+
+        private val SEED_ON_CREATE = object : RoomDatabase.Callback() {
+            override fun onCreate(db: SupportSQLiteDatabase) {
+                seedDefaultRates(db)
+            }
+        }
+
         fun get(context: Context): AppDatabase =
             instance ?: synchronized(this) {
                 instance ?: Room.databaseBuilder(
                     context.applicationContext,
                     AppDatabase::class.java,
                     "shop_tracker.db"
-                ).addMigrations(MIGRATION_1_2).build().also { instance = it }
+                ).addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5, MIGRATION_5_6, MIGRATION_6_7, MIGRATION_7_8)
+                    .addCallback(SEED_ON_CREATE)
+                    .build().also { instance = it }
             }
     }
 }

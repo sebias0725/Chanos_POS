@@ -5,7 +5,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.Color
+
+object LocalThemePreference {
+    var dark by androidx.compose.runtime.mutableStateOf(false)
+}
 
 private val LightColors = lightColorScheme(
     primary = Color(0xFF00796B),
@@ -33,15 +39,15 @@ private val DarkColors = darkColorScheme(
 
 @Composable
 fun ShopTheme(content: @Composable () -> Unit) {
-    val dark = isSystemInDarkTheme()
+    val dark = LocalThemePreference.dark
     MaterialTheme(colorScheme = if (dark) DarkColors else LightColors, content = content)
 }
 
 @Composable
-fun positiveColor(): Color = if (isSystemInDarkTheme()) Color(0xFF66BB6A) else Color(0xFF2E7D32)
+fun positiveColor(): Color = if (LocalThemePreference.dark) Color(0xFF66BB6A) else Color(0xFF2E7D32)
 
 @Composable
-fun negativeColor(): Color = if (isSystemInDarkTheme()) Color(0xFFEF5350) else Color(0xFFC62828)
+fun negativeColor(): Color = if (LocalThemePreference.dark) Color(0xFFEF5350) else Color(0xFFC62828)
 
 @Composable
 fun neutralColor(): Color = MaterialTheme.colorScheme.onSurfaceVariant

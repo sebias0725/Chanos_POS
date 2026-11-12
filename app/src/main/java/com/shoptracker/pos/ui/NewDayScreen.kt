@@ -27,6 +27,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.shoptracker.pos.MainViewModel
 import com.shoptracker.pos.data.BusinessDay
+import com.shoptracker.pos.data.finalFloatFrom
 import com.shoptracker.pos.util.Fmt
 
 /**
@@ -50,15 +51,17 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
     val data = rememberDayData(vm, setOf(day.id))
     val stats = data.stats
 
-    var finalFloat by remember { mutableStateOf("") }
     var finalCash by remember { mutableStateOf("") }
+    var remit by remember { mutableStateOf("") }
     var showErrors by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var addingExpense by remember { mutableStateOf(false) }
 
-    val floatC = Fmt.parsePeso(finalFloat)
     val cashC = Fmt.parsePeso(finalCash)
+    val remitC = Fmt.parsePeso(remit)
+    val floatC = if (cashC != null && remitC != null) finalFloatFrom(cashC, remitC) else null
+    val remitTooHigh = floatC != null && floatC < 0
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Close current day", onBack)
@@ -112,22 +115,34 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
             }
 
             Text(
-                "Count your money and enter the final amounts. Sales and expenses are shown for reference only; " +
-                    "they are not added to or subtracted from your cash automatically.",
+                "Count your money and enter the final cash on hand and the amount remitted. Sales and expenses " +
+                    "are shown for reference only; they are not added to or subtracted from your cash automatically.",
                 style = MaterialTheme.typography.bodySmall
-            )
-            MoneyField(
-                finalFloat, { finalFloat = it }, "Final floating money",
-                error = if (showErrors && floatC == null) "Enter an amount (0 is fine)" else null
             )
             MoneyField(
                 finalCash, { finalCash = it }, "Final cash on hand",
                 error = if (showErrors && cashC == null) "Enter an amount (0 is fine)" else null
             )
+            MoneyField(
+                remit, { remit = it }, "Remit",
+                error = when {
+                    showErrors && remitC == null -> "Enter an amount (0 is fine)"
+                    remitTooHigh -> "Remit cannot be more than cash on hand"
+                    else -> null
+                }
+            )
+            SectionCard("Final floating money (cash on hand - remit)") {
+                LabelValue(
+                    "Final floating money",
+                    if (floatC != null && !remitTooHigh) Fmt.peso(floatC) else "-",
+                    bold = true
+                )
+            }
         }
         Button(
             onClick = {
-                if (floatC == null || cashC == null) showErrors = true else confirm = true
+                if (cashC == null || remitC == null || floatC == null || remitTooHigh) showErrors = true
+                else confirm = true
             },
             enabled = !busy,
             modifier = Modifier
@@ -147,14 +162,15 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
         )
     }
 
-    if (confirm && floatC != null && cashC != null) {
+    if (confirm && floatC != null && cashC != null && remitC != null && !remitTooHigh) {
         AlertDialog(
             onDismissRequest = { confirm = false },
             title = { Text("Close this business day?") },
             text = {
                 Text(
                     "No more sales, orders or expenses can be recorded for ${Fmt.shortDate(day.openedAt)} after closing.\n\n" +
-                        "Final floating money: ${Fmt.peso(floatC)}\nFinal cash on hand: ${Fmt.peso(cashC)}"
+                        "Cash on hand: ${Fmt.peso(cashC)}\nRemit: ${Fmt.peso(remitC)}\n" +
+                        "Final floating money: ${Fmt.peso(floatC)}"
                 )
             },
             confirmButton = {
@@ -163,7 +179,7 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
                     onClick = {
                         busy = true
                         confirm = false
-                        vm.closeDay(day.id, floatC, cashC) { busy = false }
+                        vm.closeDay(day.id, cashC, remitC) { busy = false }
                     }
                 ) { Text("Close day") }
             },
@@ -235,9 +251,9 @@ private fun StartDayStep(vm: MainViewModel, onBack: () -> Unit, onDone: () -> Un
                 }
             }
             NumberField(
-                target, { target = it }, "Target sales (number of meals/products)",
+                target, { target = it }, "Target sales",
                 error = if (showErrors && targetN == null) "Enter a whole number" else null,
-                hint = "Leave empty or 0 for no target"
+                hint = ""
             )
         }
         Button(

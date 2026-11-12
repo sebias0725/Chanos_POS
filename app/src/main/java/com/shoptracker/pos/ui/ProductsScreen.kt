@@ -40,12 +40,14 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.shoptracker.pos.MainViewModel
+import com.shoptracker.pos.data.Category
 import com.shoptracker.pos.data.Product
 import com.shoptracker.pos.util.Fmt
 
 @Composable
 fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
     val products by vm.products.collectAsState()
+    val categories by vm.categories.collectAsState()
     val lifetime by vm.lifetime.collectAsState()
     val day by vm.openDay.collectAsState()
     val data = rememberDayData(vm, setOfNotNull(day?.id))
@@ -54,9 +56,24 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
     var editing by remember { mutableStateOf<Product?>(null) }
     var adding by remember { mutableStateOf(false) }
     var deleting by remember { mutableStateOf<Product?>(null) }
+    var managingCategories by remember { mutableStateOf(false) }
+
+    // Products grouped by category (categories A-Z, then Uncategorized). A product whose category id
+    // no longer exists is treated as Uncategorized, so nothing can ever drop out of the list.
+    val groups = remember(products, categories) {
+        val known = categories.map { it.id }.toSet()
+        val byCat = products.groupBy { if (it.categoryId != null && it.categoryId in known) it.categoryId else null }
+        buildList {
+            categories.forEach { c -> byCat[c.id]?.let { add(c.name to it) } }
+            byCat[null]?.let { add(UNCATEGORIZED_LABEL to it) }
+        }
+    }
+    val showHeaders = categories.isNotEmpty()
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader("Products", onBack)
+        ScreenHeader("Products", onBack) {
+            TextButton(onClick = { managingCategories = true }) { Text("CATEGORIES") }
+        }
         Box(Modifier.weight(1f)) {
             if (products.isEmpty()) {
                 EmptyState(
@@ -69,7 +86,19 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
                     contentPadding = PaddingValues(12.dp),
                     verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    items(products, key = { it.id }) { p ->
+                    groups.forEach { (groupName, groupProducts) ->
+                    if (showHeaders) {
+                        item(key = "header:$groupName") {
+                            Text(
+                                "$groupName (${groupProducts.size})",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.padding(top = 6.dp)
+                            )
+                        }
+                    }
+                    items(groupProducts, key = { it.id }) { p ->
                         val today = todayById[p.id]
                         val life = lifetime[p.id]
                         Card(
@@ -114,6 +143,7 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
                             }
                         }
                     }
+                    }
                 }
             }
         }
@@ -129,9 +159,10 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
     if (adding) {
         ProductDialog(
             initial = null,
+            categories = categories,
             onDismiss = { adding = false },
-            onSave = { name, price, profit, stock ->
-                vm.addProduct(name, price, profit, stock)
+            onSave = { name, price, profit, stock, categoryId ->
+                vm.addProduct(name, price, profit, stock, categoryId)
                 adding = false
             }
         )
@@ -139,18 +170,28 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
     editing?.let { p ->
         ProductDialog(
             initial = p,
+            categories = categories,
             onDismiss = { editing = null },
-            onSave = { name, price, profit, stock ->
+            onSave = { name, price, profit, stock, categoryId ->
                 vm.updateProduct(
                     p.copy(
                         name = name.trim(),
                         priceCentavos = price,
                         profitCentavos = profit,
-                        stock = stock
+                        stock = stock,
+                        categoryId = categoryId
                     )
                 )
                 editing = null
             }
+        )
+    }
+    if (managingCategories) {
+        CategoriesDialog(
+            vm = vm,
+            categories = categories,
+            products = products,
+            onDismiss = { managingCategories = false }
         )
     }
     deleting?.let { p ->
@@ -177,13 +218,15 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
 @Composable
 private fun ProductDialog(
     initial: Product?,
+    categories: List<Category>,
     onDismiss: () -> Unit,
-    onSave: (String, Long, Long, Int) -> Unit
+    onSave: (String, Long, Long, Int, Long?) -> Unit
 ) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var price by remember { mutableStateOf(if (initial != null) Fmt.plain(initial.priceCentavos) else "") }
     var profit by remember { mutableStateOf(if (initial != null) Fmt.plain(initial.profitCentavos) else "") }
     var stock by remember { mutableStateOf(initial?.stock?.toString() ?: "") }
+    var categoryId by remember { mutableStateOf(initial?.categoryId) }
     var showErrors by remember { mutableStateOf(false) }
 
     val priceCentavos = Fmt.parsePeso(price)
@@ -213,6 +256,11 @@ private fun ProductDialog(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                     modifier = Modifier.fillMaxWidth()
                 )
+                CategoryDropdown(
+                    categories = categories,
+                    selectedId = categoryId,
+                    onSelect = { categoryId = it }
+                )
                 MoneyField(price, { price = it }, "Selling price", error = priceError)
                 MoneyField(profit, { profit = it }, "Profit per unit", error = profitError)
                 NumberField(
@@ -235,7 +283,10 @@ private fun ProductDialog(
                 ) {
                     showErrors = true
                 } else {
-                    onSave(name, priceCentavos, profitCentavos, stockN)
+                    onSave(
+                        name, priceCentavos, profitCentavos, stockN,
+                        categoryId?.takeIf { id -> categories.any { it.id == id } }
+                    )
                 }
             }) { Text("Save") }
         },

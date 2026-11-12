@@ -12,8 +12,28 @@ const val STATUS_CANCELLED = "CANCELLED"
 const val ORDER_PICKUP = "PICKUP"
 const val ORDER_DELIVERY = "DELIVERY"
 
+/** Payment methods offered on an order. Stored as plain text on the order. */
+const val PAYMENT_COD = "COD"
+val PAYMENT_METHODS: List<String> = listOf(PAYMENT_COD, "QR", "Bank Transfer")
+
+/**
+ * Preferred delivery time. "Pending" = the customer has not confirmed a time yet; it is ALWAYS the
+ * first option. The chosen slot is stored as text on the order, so changing this list later never
+ * alters existing orders. "" (blank) means "not recorded" (orders made before this field existed,
+ * and pickup orders).
+ */
+const val DELIVERY_TIME_PENDING = "Pending"
+val DELIVERY_TIME_SLOTS: List<String> = listOf(
+    DELIVERY_TIME_PENDING,
+    "9:00 AM – 11:00 AM",
+    "11:00 AM – 1:00 PM",
+    "1:00 PM – 3:00 PM",
+    "3:00 PM – 5:00 PM",
+    "5:00 PM – 7:00 PM"
+)
+
 /** All money is stored as whole centavos (Long) to avoid floating point errors. */
-@Entity(tableName = "products")
+@Entity(tableName = "products", indices = [Index("categoryId")])
 data class Product(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
@@ -23,8 +43,39 @@ data class Product(
     /** Profit per unit, in centavos (entered by the user). */
     @ColumnInfo(defaultValue = "0") val profitCentavos: Long = 0,
     /** Remaining stock (units). Reduced by sales, restored by undo/remove/cancel. */
-    @ColumnInfo(defaultValue = "0") val stock: Int = 0
+    @ColumnInfo(defaultValue = "0") val stock: Int = 0,
+    /**
+     * Optional category. NULL means "Uncategorized" (every product that existed before categories
+     * were added). Not a hard foreign key on purpose: a dangling id is simply shown as Uncategorized,
+     * so a product can never become invalid or disappear because of its category.
+     */
+    val categoryId: Long? = null
 )
+
+/** A user-defined product category (e.g. "Drinks", "Snacks"). */
+@Entity(tableName = "categories")
+data class Category(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val createdAt: Long = System.currentTimeMillis()
+)
+
+/** Where products go when their category is deleted. */
+sealed interface CategoryTarget {
+    data object Uncategorized : CategoryTarget
+    data class To(val categoryId: Long) : CategoryTarget
+}
+
+/** Outcome of a category operation, so the UI can show a precise message. */
+sealed interface CategoryResult {
+    data object Ok : CategoryResult
+    data class Error(val message: String) : CategoryResult
+}
+
+const val CATEGORY_NAME_MAX = 30
+
+/** Trims and collapses inner whitespace. */
+fun cleanCategoryName(raw: String): String = raw.trim().replace(Regex("\\s+"), " ")
 
 @Entity(tableName = "business_days")
 data class BusinessDay(
@@ -35,10 +86,18 @@ data class BusinessDay(
     val openingCashCentavos: Long,
     val targetUnits: Int,
     val finalFloatCentavos: Long? = null,
-    val finalCashCentavos: Long? = null
+    val finalCashCentavos: Long? = null,
+    /**
+     * Cash handed over (remitted) when closing. Stored separately from Expenses. Null for days
+     * closed before this field existed (their records are left untouched).
+     */
+    val remitCentavos: Long? = null
 )
 
 val BusinessDay.isOpen: Boolean get() = closedAt == null
+
+/** Final Floating Money = Cash on Hand - Remit. */
+fun finalFloatFrom(cashOnHand: Long, remit: Long): Long = cashOnHand - remit
 
 /**
  * A single sale line. productName, unitPriceCentavos and unitProfitCentavos are snapshots taken
@@ -79,7 +138,13 @@ data class SalesOrder(
     val note: String,
     val createdAt: Long,
     val status: String = STATUS_COMPLETED,
-    val cancelledAt: Long? = null
+    val cancelledAt: Long? = null,
+    /** COD / QR / Bank Transfer. Blank for orders created before this field existed. */
+    @ColumnInfo(defaultValue = "''") val paymentMethod: String = "",
+    /** Preferred delivery time (see DELIVERY_TIME_SLOTS). Blank = not recorded. Editable later. */
+    @ColumnInfo(defaultValue = "''") val deliveryTime: String = "",
+    @ColumnInfo(defaultValue = "0") val paid: Boolean = false,
+    @ColumnInfo(defaultValue = "0") val delivered: Boolean = false
 )
 
 @Entity(
@@ -94,13 +159,26 @@ data class Expense(
     val createdAt: Long
 )
 
-/** Delivery fee reference list entry (area / destination and its fee). */
+/** A Delivery Rate: a location / name and its delivery fee. Orders copy the fee, they do not link here. */
 @Entity(tableName = "delivery_rates")
 data class DeliveryRate(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val name: String,
     val feeCentavos: Long,
     val note: String = ""
+)
+
+@Entity(tableName = "wastes", indices = [Index("businessDayId")])
+data class Waste(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val businessDayId: Long,
+    val productId: Long,
+    val productName: String,
+    val quantity: Int,
+    val unitValueCentavos: Long,
+    val reason: String,
+    val note: String,
+    val createdAt: Long
 )
 
 data class ProductTotal(

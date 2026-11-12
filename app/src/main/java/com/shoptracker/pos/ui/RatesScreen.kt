@@ -34,7 +34,7 @@ import com.shoptracker.pos.MainViewModel
 import com.shoptracker.pos.data.DeliveryRate
 import com.shoptracker.pos.util.Fmt
 
-/** Delivery fee reference chart. Fees can be edited at any time. */
+/** Delivery Rates: add, edit and delete location rates. Orders keep their own copy of the fee. */
 @Composable
 fun RatesScreen(vm: MainViewModel, onBack: () -> Unit) {
     val rates by vm.rates.collectAsState()
@@ -43,11 +43,11 @@ fun RatesScreen(vm: MainViewModel, onBack: () -> Unit) {
     var deleting by remember { mutableStateOf<DeliveryRate?>(null) }
 
     Column(Modifier.fillMaxSize()) {
-        ScreenHeader("Delivery fee reference", onBack)
+        ScreenHeader("Delivery Rates", onBack)
         if (rates.isEmpty()) {
             EmptyState(
-                "No delivery fees yet",
-                "Add each area or destination with its delivery fee. You can pick from this list when taking a delivery order.",
+                "No delivery rates yet",
+                "Add each location with its delivery fee. You can pick from this list when taking a delivery order.",
                 Modifier.weight(1f)
             )
         } else {
@@ -77,7 +77,7 @@ fun RatesScreen(vm: MainViewModel, onBack: () -> Unit) {
                                 )
                             }
                             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                                TextButton(onClick = { editing = r }) { Text("Update") }
+                                TextButton(onClick = { editing = r }) { Text("Edit") }
                                 TextButton(onClick = { deleting = r }) { Text("Delete") }
                             }
                         }
@@ -91,7 +91,7 @@ fun RatesScreen(vm: MainViewModel, onBack: () -> Unit) {
                 .fillMaxWidth()
                 .padding(12.dp)
                 .height(56.dp)
-        ) { Text("ADD DELIVERY FEE", fontWeight = FontWeight.Bold) }
+        ) { Text("ADD DELIVERY RATE", fontWeight = FontWeight.Bold) }
     }
 
     if (adding) {
@@ -118,7 +118,7 @@ fun RatesScreen(vm: MainViewModel, onBack: () -> Unit) {
         AlertDialog(
             onDismissRequest = { deleting = null },
             title = { Text("Delete ${r.name}?") },
-            text = { Text("This only removes it from the reference list. Past orders keep the fee they were charged.") },
+            text = { Text("This only removes it from the rates list. Past orders keep the delivery fee they were charged.") },
             confirmButton = {
                 TextButton(onClick = {
                     vm.deleteRate(r)
@@ -144,16 +144,16 @@ private fun RateDialog(
 
     AlertDialog(
         onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Add delivery fee" else "Update delivery fee") },
+        title = { Text(if (initial == null) "Add delivery rate" else "Edit delivery rate") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 OutlinedTextField(
                     value = name,
                     onValueChange = { if (it.length <= 60) name = it },
-                    label = { Text("Area / destination") },
+                    label = { Text("Location / name") },
                     singleLine = true,
                     isError = showErrors && name.isBlank(),
-                    supportingText = if (showErrors && name.isBlank()) ({ Text("Enter an area") }) else null,
+                    supportingText = if (showErrors && name.isBlank()) ({ Text("Enter a location") }) else null,
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                     modifier = Modifier.fillMaxWidth()
                 )

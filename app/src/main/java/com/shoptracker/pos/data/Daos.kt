@@ -26,6 +26,34 @@ interface ProductDao {
 
     @Query("UPDATE products SET stock = stock + :delta WHERE id = :id")
     suspend fun adjustStock(id: Long, delta: Int)
+
+    @Query("SELECT COUNT(*) FROM products WHERE categoryId = :categoryId")
+    suspend fun countInCategory(categoryId: Long): Int
+
+    /** Moves every product of one category to another (null = Uncategorized). Returns rows moved. */
+    @Query("UPDATE products SET categoryId = :toCategoryId WHERE categoryId = :fromCategoryId")
+    suspend fun moveCategory(fromCategoryId: Long, toCategoryId: Long?): Int
+}
+
+@Dao
+interface CategoryDao {
+    @Query("SELECT * FROM categories ORDER BY name COLLATE NOCASE")
+    fun observeAll(): Flow<List<Category>>
+
+    @Query("SELECT * FROM categories WHERE id = :id")
+    suspend fun getById(id: Long): Category?
+
+    @Query("SELECT * FROM categories WHERE name = :name COLLATE NOCASE LIMIT 1")
+    suspend fun findByName(name: String): Category?
+
+    @Insert
+    suspend fun insert(category: Category): Long
+
+    @Update
+    suspend fun update(category: Category)
+
+    @Query("DELETE FROM categories WHERE id = :id")
+    suspend fun deleteById(id: Long)
 }
 
 @Dao
@@ -103,6 +131,16 @@ interface OrderDao {
     @Insert
     suspend fun insert(order: SalesOrder): Long
 
+    /** Changes ONLY the preferred delivery time; nothing else on the order is touched. */
+    @Query("UPDATE orders SET deliveryTime = :time WHERE id = :id")
+    suspend fun setDeliveryTime(id: Long, time: String): Int
+
+    @Query("UPDATE orders SET paid = :paid WHERE id = :id AND status = 'COMPLETED'")
+    suspend fun setPaid(id: Long, paid: Boolean): Int
+
+    @Query("UPDATE orders SET delivered = :delivered WHERE id = :id AND status = 'COMPLETED'")
+    suspend fun setDelivered(id: Long, delivered: Boolean): Int
+
     @Update
     suspend fun update(order: SalesOrder)
 }
@@ -123,6 +161,21 @@ interface ExpenseDao {
 
     @Delete
     suspend fun delete(expense: Expense)
+}
+
+@Dao
+interface WasteDao {
+    @Query("SELECT * FROM wastes ORDER BY createdAt DESC, id DESC")
+    fun observeAll(): Flow<List<Waste>>
+
+    @Insert
+    suspend fun insert(waste: Waste): Long
+
+    @Query("DELETE FROM wastes WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("SELECT * FROM wastes WHERE id = :id")
+    suspend fun getById(id: Long): Waste?
 }
 
 @Dao

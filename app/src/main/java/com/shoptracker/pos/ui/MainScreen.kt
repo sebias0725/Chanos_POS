@@ -154,6 +154,7 @@ fun MainScreen(
         }
 
         BottomBar(
+            dayActive = day != null,
             canUndo = day != null && stats.units > 0,
             onUndo = { vm.undo() },
             onNewOrder = onNewOrder,
@@ -234,12 +235,14 @@ private fun TopSummary(
     ) {
         Column(Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
             Column(Modifier.clickable(enabled = day != null) { onOpenSummary() }) {
-                Text(
-                    if (day != null) Fmt.date(day.openedAt) else "No active business day",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(Modifier.height(4.dp))
+                if (day != null) {
+                    Text(
+                        Fmt.date(day.openedAt),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Spacer(Modifier.height(4.dp))
+                }
                 StatusChip(day)
             }
 
@@ -247,7 +250,7 @@ private fun TopSummary(
                 NavText("Products", onProducts)
                 NavText("Orders", onOrders)
                 NavText("Expenses", onExpenses)
-                NavText("DF Rates", onRates)
+                NavText("Delivery Rates", onRates)
                 NavText("History", onHistory)
             }
 
@@ -291,7 +294,7 @@ private fun TopSummary(
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     when {
-                        day == null -> "Tap NEW DAY to begin recording sales."
+                        day == null -> ""
                         lastSale == null -> "No sales recorded yet today"
                         else -> "Last sale: ${lastSale.productName} • ${Fmt.time(lastSale.timestamp)}"
                     },
@@ -317,7 +320,7 @@ private fun StatusChip(day: BusinessDay?) {
         color = if (open) positiveColor().copy(alpha = 0.18f) else MaterialTheme.colorScheme.surface
     ) {
         Text(
-            if (open && day != null) "● OPEN since ${Fmt.time(day.openedAt)}" else "○ NO ACTIVE DAY",
+            if (open && day != null) "● OPEN since ${Fmt.time(day.openedAt)}" else "● NO ACTIVE DAY",
             modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp),
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Bold,
@@ -408,6 +411,7 @@ private fun ProductCard(
 
 @Composable
 private fun BottomBar(
+    dayActive: Boolean,
     canUndo: Boolean,
     onUndo: () -> Unit,
     onNewOrder: () -> Unit,
@@ -439,7 +443,7 @@ private fun BottomBar(
                 onClick = onNewDay,
                 modifier = Modifier.weight(1.1f).height(56.dp),
                 contentPadding = pad
-            ) { Text("NEW DAY", fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
+            ) { Text(if (dayActive) "CLOSE DAY" else "NEW DAY", fontSize = 16.sp, fontWeight = FontWeight.Bold, maxLines = 1) }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = onChart, modifier = Modifier.weight(1f).height(44.dp), contentPadding = pad) {

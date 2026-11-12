@@ -1,12 +1,15 @@
 package com.shoptracker.pos.ui
 
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.matchParentSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
@@ -14,6 +17,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -32,7 +37,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import com.shoptracker.pos.MainViewModel
+import com.shoptracker.pos.data.DELIVERY_TIME_PENDING
+import com.shoptracker.pos.data.DELIVERY_TIME_SLOTS
 import com.shoptracker.pos.data.DeliveryRate
+import com.shoptracker.pos.data.PAYMENT_COD
+import com.shoptracker.pos.data.PAYMENT_METHODS
 import com.shoptracker.pos.data.ORDER_DELIVERY
 import com.shoptracker.pos.data.ORDER_PICKUP
 import com.shoptracker.pos.data.Product
@@ -72,14 +81,19 @@ private fun OrderForm(
     var customer by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
     var fee by remember { mutableStateOf("") }
+    // null = "Custom" (manual amount). Otherwise the id of the chosen Delivery Rate; its fee is COPIED into `fee`.
+    var selectedRateId by remember { mutableStateOf<Long?>(null) }
     var note by remember { mutableStateOf("") }
+    var payment by remember { mutableStateOf(PAYMENT_COD) }
+    var deliveryTime by remember { mutableStateOf(DELIVERY_TIME_PENDING) }
     val qty = remember { mutableStateMapOf<Long, Int>() }
-    var showRates by remember { mutableStateOf(false) }
     var showErrors by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
 
     val delivery = type == ORDER_DELIVERY
+    val selectedRate = rates.firstOrNull { it.id == selectedRateId }
+    val isCustomFee = selectedRate == null
     val feeCentavos: Long? = if (delivery) Fmt.parsePeso(fee) else 0L
     val itemsTotal = products.sumOf { it.priceCentavos * (qty[it.id] ?: 0) }
     val totalUnits = products.sumOf { qty[it.id] ?: 0 }
@@ -118,42 +132,55 @@ private fun OrderForm(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                     modifier = Modifier.fillMaxWidth()
                 )
-                OutlinedButton(
-                    onClick = { showRates = !showRates },
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        when {
-                            rates.isEmpty() -> "No delivery fee reference yet (add in DF Rates)"
-                            showRates -> "Hide delivery fee reference"
-                            else -> "Choose from delivery fee reference"
+                DeliveryFeeDropdown(
+                    rates = rates,
+                    selectedRate = selectedRate,
+                    onCustom = {
+                        if (selectedRateId != null) {
+                            selectedRateId = null
+                            fee = ""
                         }
+                    },
+                    onRate = { r ->
+                        selectedRateId = r.id
+                        fee = Fmt.plain(r.feeCentavos) // snapshot: later edits to the rate do not touch this order
+                        if (address.isBlank()) address = r.name
+                    }
+                )
+                if (rates.isEmpty()) {
+                    Text(
+                        "No delivery rates yet. Add some in Delivery Rates, or use Custom.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
-                if (showRates && rates.isNotEmpty()) {
-                    Column(Modifier.fillMaxWidth()) {
-                        rates.forEach { r ->
-                            TextButton(
-                                onClick = {
-                                    if (address.isBlank()) address = r.name
-                                    fee = Fmt.plain(r.feeCentavos)
-                                    showRates = false
-                                },
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(r.name, modifier = Modifier.weight(1f))
-                                    Text(Fmt.peso(r.feeCentavos), fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
+                if (isCustomFee) {
+                    MoneyField(
+                        fee, { fee = it }, "Custom delivery fee",
+                        error = if (showErrors && feeCentavos == null) "Enter the delivery fee (0 if free)" else null
+                    )
                 }
-                MoneyField(
-                    fee, { fee = it }, "Delivery fee",
-                    error = if (showErrors && feeCentavos == null) "Enter the delivery fee (0 if free)" else null
+                OptionDropdown(
+                    label = "Preferred delivery time",
+                    selected = deliveryTime,
+                    options = DELIVERY_TIME_SLOTS,
+                    onSelect = { deliveryTime = it }
                 )
+                if (deliveryTime == DELIVERY_TIME_PENDING) {
+                    Text(
+                        "Pending = the customer has not confirmed a delivery time yet. You can change it later in Orders.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
             }
+
+            OptionDropdown(
+                label = "Payment method",
+                selected = payment,
+                options = PAYMENT_METHODS,
+                onSelect = { payment = it }
+            )
 
             Text("Items", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             products.forEach { p ->
@@ -207,6 +234,8 @@ private fun OrderForm(
                         (if (customer.isNotBlank()) " • ${customer.trim()}" else "") + "\n" +
                         "$totalUnits units • items ${Fmt.peso(itemsTotal)}\n" +
                         (if (delivery) "Delivery fee ${Fmt.peso(feeCentavos)}\n" else "") +
+                        (if (delivery) "Delivery time: $deliveryTime\n" else "") +
+                        "Payment: $payment\n" +
                         "Total ${Fmt.peso(grandTotal)}\n\n" +
                         "It will be counted as sales of the current business day."
                 )
@@ -222,7 +251,7 @@ private fun OrderForm(
                                 val n = qty[p.id] ?: 0
                                 if (n > 0) p.id to n else null
                             }
-                            vm.createOrder(customer, type, address, feeCentavos, note, items) { ok ->
+                            vm.createOrder(customer, type, address, feeCentavos, note, items, payment, deliveryTime) { ok ->
                                 busy = false
                                 if (ok) onDone()
                             }
@@ -234,6 +263,54 @@ private fun OrderForm(
         )
     }
 }
+
+/** First option is always "Custom"; then every Delivery Rate (A-Z as supplied by the DAO). */
+@Composable
+private fun DeliveryFeeDropdown(
+    rates: List<DeliveryRate>,
+    selectedRate: DeliveryRate?,
+    onCustom: () -> Unit,
+    onRate: (DeliveryRate) -> Unit
+) {
+    var open by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth()) {
+        OutlinedTextField(
+            value = if (selectedRate == null) CUSTOM_FEE_LABEL else rateOptionLabel(selectedRate),
+            onValueChange = {},
+            readOnly = true,
+            label = { Text("Delivery fee") },
+            trailingIcon = { Text("▾", style = MaterialTheme.typography.titleMedium) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Box(
+            Modifier
+                .matchParentSize()
+                .clickable { open = true }
+        )
+        DropdownMenu(expanded = open, onDismissRequest = { open = false }) {
+            DropdownMenuItem(
+                text = { Text(CUSTOM_FEE_LABEL, fontWeight = FontWeight.Bold) },
+                onClick = { onCustom(); open = false }
+            )
+            rates.forEach { r ->
+                DropdownMenuItem(
+                    text = {
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text(r.name, modifier = Modifier.weight(1f))
+                            Text(Fmt.peso(r.feeCentavos), fontWeight = FontWeight.Bold)
+                        }
+                    },
+                    onClick = { onRate(r); open = false }
+                )
+            }
+        }
+    }
+}
+
+private const val CUSTOM_FEE_LABEL = "Custom"
+
+private fun rateOptionLabel(r: DeliveryRate): String = r.name + " • " + Fmt.peso(r.feeCentavos)
 
 @Composable
 private fun TypeButton(label: String, selected: Boolean, onClick: () -> Unit, modifier: Modifier) {
