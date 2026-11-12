@@ -28,6 +28,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.IconButton
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -63,12 +64,12 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
             append("‼️ Today's Orders")
             orders.forEachIndexed { index, o ->
                 val lines = data.txns.filter { it.orderId == o.id && it.status == STATUS_COMPLETED }
-                append("\n\n${index + 1}. ${o.customerName.ifBlank { "Customer #${o.id}" }}${if (o.delivered) " [✅ Delivered]" else ""}")
+                append("\n\n${index + 1}. ${o.customerName.ifBlank { "Customer #${o.id}" }}${if (o.delivered) (if (o.type == ORDER_DELIVERY) " [✅ Delivered]" else " [✅ Picked Up]") else ""}")
                 append("\n- ")
                 append(lines.joinToString(", ") { "${it.quantity}x ${it.productName}" })
                 val total = lines.sumOf { it.totalCentavos } + o.deliveryFeeCentavos
                 append("\n- ${Fmt.peso(total)} (${Fmt.peso(o.deliveryFeeCentavos)} df; ${o.paymentMethod.ifBlank { "Unspecified" }}; ${if (o.paid) "Paid" else "Pending"})")
-                if (o.address.isNotBlank()) append("\n- ${o.address}")
+                append("\n- ${o.address.ifBlank { if (o.type == ORDER_DELIVERY) "Address not provided" else "Pickup" }}")
                 if (o.note.isNotBlank()) append("\n- Additional Notes: ${o.note}")
                 append("\n- Time: ${o.deliveryTime.ifBlank { "Pending" }}")
             }
@@ -81,9 +82,11 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
     Column(Modifier.fillMaxSize()) {
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             ScreenHeader(if (day != null) "Orders • ${Fmt.dayMonth(day.openedAt)}" else "Orders", onBack)
-            IconButton(onClick = { copyOrders() }) { Text("Copy", style = MaterialTheme.typography.labelMedium) }
+            IconButton(onClick = { copyOrders() }) {
+                Text("📋", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+            }
         }
-        if (copied) Text("Orders copied to clipboard", modifier = Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
+        if (copied) Text("All orders copied to clipboard", modifier = Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
         if (orders.isEmpty()) {
             EmptyState(
                 "No orders yet",
@@ -97,10 +100,6 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 items(orders, key = { it.id }) { o ->
-                    val lines = data.txns.filter { it.orderId == o.id }
-                    val itemsTotal = lines.sumOf { it.totalCentavos }
-                    val done = o.status == STATUS_COMPLETED
-                    val strike = if (done) TextDecoration.None else TextDecoration.LineThrough
                     var swipeDistance by remember(o.id) { mutableStateOf(0f) }
                     Card(
                         Modifier.fillMaxWidth()
@@ -119,63 +118,25 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
                             }.clickable { details = o },
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
-                        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(
-                                    "#${o.id} • " + (if (o.type == ORDER_DELIVERY) "DELIVERY" else "PICKUP"),
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold
-                                )
-                                Text(
-                                    if (done) Fmt.time(o.createdAt) else "CANCELLED",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color = if (done) MaterialTheme.colorScheme.onSurfaceVariant else negativeColor()
-                                )
+                        Row(Modifier.fillMaxWidth().padding(12.dp), horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                Text("#${orders.indexOf(o) + 1}  •  ${if (o.type == ORDER_DELIVERY) "DELIVERY" else "PICKUP"}",
+                                    style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.primary)
+                                Text(o.customerName.ifBlank { "Customer #${o.id}" },
+                                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                                if (o.type == ORDER_DELIVERY) Text(o.deliveryTime.ifBlank { "Pending" },
+                                    style = MaterialTheme.typography.labelSmall)
                             }
-                            if (o.customerName.isNotBlank()) {
-                                Text(o.customerName, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
-                            }
-                            if (o.address.isNotBlank()) {
-                                Text(o.address, style = MaterialTheme.typography.bodySmall)
-                            }
-                            HorizontalDivider()
-                            lines.forEach { l ->
-                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                    Text(
-                                        "${l.quantity} × ${l.productName}",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        textDecoration = strike,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Text(Fmt.peso(l.totalCentavos), style = MaterialTheme.typography.bodyMedium, textDecoration = strike)
+                            Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
+                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Text("Paid", style = MaterialTheme.typography.labelSmall)
+                                    Checkbox(checked = o.paid, onCheckedChange = { vm.setOrderPaid(o.id, it) }, enabled = day != null)
                                 }
-                            }
-                            if (o.type == ORDER_DELIVERY) {
-                                LabelValue("Delivery fee", Fmt.peso(o.deliveryFeeCentavos))
-                            }
-                            LabelValue("Total", Fmt.peso(itemsTotal + o.deliveryFeeCentavos), bold = true)
-                            if (o.paymentMethod.isNotBlank()) {
-                                LabelValue("Payment", o.paymentMethod)
-                            }
-                            if (o.type == ORDER_DELIVERY) {
-                                LabelValue("Delivery time", o.deliveryTime.ifBlank { "Not recorded" })
-                                if (done) {
-                                    OutlinedButton(onClick = { editingTime = o }, modifier = Modifier.fillMaxWidth()) {
-                                        Text("Edit delivery time")
-                                    }
-                                }
-                            }
-                            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Text(if (o.delivered) "Delivered" else "Not delivered")
-                                Text(if (o.paid) "Paid" else "Unpaid")
-                            }
-                            OutlinedButton(onClick = { details = o }, modifier = Modifier.fillMaxWidth()) { Text("Order details / status") }
-                            if (o.note.isNotBlank()) {
-                                Text("Note: ${o.note}", style = MaterialTheme.typography.bodySmall)
-                            }
-                            if (done && day != null && day.isOpen) {
-                                OutlinedButton(onClick = { cancelling = o }, modifier = Modifier.fillMaxWidth()) {
-                                    Text("Cancel order")
+                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Text(if (o.type == ORDER_DELIVERY) "Delivered" else "Picked Up",
+                                        style = MaterialTheme.typography.labelSmall)
+                                    Checkbox(checked = o.delivered, onCheckedChange = { vm.setOrderDelivered(o.id, it) }, enabled = day != null)
                                 }
                             }
                         }
@@ -207,13 +168,16 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
                     Text("Address: ${o.address}")
                     Text("Notes: ${o.note}")
                     Text("Delivery time: ${o.deliveryTime.ifBlank { "Pending" }}")
+                    if (o.type == ORDER_DELIVERY && day != null) {
+                        OutlinedButton(onClick = { editingTime = o; details = null }) { Text("Edit delivery time") }
+                    }
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Checkbox(checked = o.paid, onCheckedChange = { vm.setOrderPaid(o.id, it) })
                         Text("Paid")
                     }
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         Checkbox(checked = o.delivered, onCheckedChange = { vm.setOrderDelivered(o.id, it) })
-                        Text("Delivered (uncheck to reverse)")
+                        Text(if (o.type == ORDER_DELIVERY) "Delivered (uncheck to reverse)" else "Picked Up (uncheck to reverse)")
                     }
                 }
             },
@@ -226,24 +190,10 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
             onDismissRequest = { editingTime = null },
             title = { Text("Delivery time • order #${o.id}") },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    DELIVERY_TIME_SLOTS.forEach { slot ->
-                        val current = o.deliveryTime == slot
-                        TextButton(
-                            onClick = {
-                                if (!current) vm.updateDeliveryTime(o.id, slot)
-                                editingTime = null
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                (if (current) "✓ " else "") + slot,
-                                fontWeight = if (current) FontWeight.Bold else FontWeight.Normal,
-                                modifier = Modifier.fillMaxWidth()
-                            )
-                        }
-                    }
-                }
+                DeliveryTimePicker(value = o.deliveryTime.ifBlank { "Pending" }, onChange = {
+                    vm.updateDeliveryTime(o.id, it)
+                    editingTime = null
+                })
             },
             confirmButton = {},
             dismissButton = { TextButton(onClick = { editingTime = null }) { Text("Close") } }
@@ -268,8 +218,5 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
     }
 }
 
-/** Pending and unrecognized delivery times are sorted after every known slot. */
-private fun deliverySortKey(time: String): Int {
-    val index = DELIVERY_TIME_SLOTS.indexOf(time)
-    return if (index <= 0) Int.MAX_VALUE else index
-}
+/** Pending and invalid times appear after all specified times. */
+private fun deliverySortKey(time: String): Int = parseDeliveryMinutes(time) ?: Int.MAX_VALUE

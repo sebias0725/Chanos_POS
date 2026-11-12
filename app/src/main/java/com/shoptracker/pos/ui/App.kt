@@ -131,15 +131,17 @@ fun App(vm: MainViewModel) {
             }
                 // A small edge handle remains available without resizing the dashboard.
                 if (!sidebar) {
-                    androidx.compose.material3.FilledTonalButton(
+                    androidx.compose.material3.Button(
                         onClick = { sidebar = true },
-                        modifier = Modifier.align(androidx.compose.ui.Alignment.CenterStart)
-                            .width(36.dp),
+                        modifier = Modifier.align(androidx.compose.ui.Alignment.BottomStart)
+                            .padding(bottom = 18.dp)
+                            .width(42.dp)
+                            .height(52.dp),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
                         shape = androidx.compose.foundation.shape.RoundedCornerShape(
                             topStart = 0.dp, bottomStart = 0.dp, topEnd = 14.dp, bottomEnd = 14.dp
                         )
-                    ) { Text("›") }
+                    ) { Text("›", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleLarge) }
                 }
                 if (sidebar) {
                     // Tap outside the panel to dismiss; no underlying dashboard interaction.

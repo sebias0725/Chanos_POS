@@ -159,12 +159,7 @@ private fun OrderForm(
                         error = if (showErrors && feeCentavos == null) "Enter the delivery fee (0 if free)" else null
                     )
                 }
-                OptionDropdown(
-                    label = "Preferred delivery time",
-                    selected = deliveryTime,
-                    options = DELIVERY_TIME_SLOTS,
-                    onSelect = { deliveryTime = it }
-                )
+                DeliveryTimePicker(value = deliveryTime, onChange = { deliveryTime = it })
                 if (deliveryTime == DELIVERY_TIME_PENDING) {
                     Text(
                         "Pending = the customer has not confirmed a delivery time yet. You can change it later in Orders.",
