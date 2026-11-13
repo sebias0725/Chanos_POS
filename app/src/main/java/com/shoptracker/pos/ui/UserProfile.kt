@@ -45,17 +45,34 @@ object UserProfile {
         } else storedPalette
         LocalThemePreference.dark = prefs.getBoolean("dark_mode", false)
     }
-    fun save(context: Context, newName: String, source: Uri?) {
+    /** Copies a selected photo into private app storage before updating profile state. */
+    fun save(context: Context, newName: String, source: Uri?): Boolean {
+        if (newName.isBlank()) return false
         if (source != null) {
-            context.contentResolver.openInputStream(source)?.use { input ->
-                photoFile(context).outputStream().use { input.copyTo(it) }
+            val destination = photoFile(context)
+            val temporary = File(context.filesDir, "user_profile_photo.pending")
+            try {
+                val stream = context.contentResolver.openInputStream(source) ?: return false
+                stream.use { input -> temporary.outputStream().use { output -> input.copyTo(output) } }
+                // Reject invalid or unsupported images rather than replacing a working photo.
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeFile(temporary.absolutePath, bounds)
+                if (bounds.outWidth <= 0 || bounds.outHeight <= 0) return false
+                if (!temporary.renameTo(destination)) {
+                    temporary.copyTo(destination, overwrite = true)
+                    temporary.delete()
+                }
+                palette = extractPalette(destination)
+                photoVersion++
+            } catch (_: Exception) {
+                temporary.delete()
+                return false
             }
-            palette = extractPalette(photoFile(context))
-            photoVersion++
         }
         name = newName.trim()
         context.getSharedPreferences("settings", Context.MODE_PRIVATE).edit()
             .putString("user_name", name).putInt("user_palette", palette).apply()
+        return true
     }
     private fun extractPalette(file: File): Int {
         val options = BitmapFactory.Options().apply { inSampleSize = 8 }
@@ -112,22 +129,47 @@ fun CreateUserScreen(onCreated: () -> Unit) {
     }
 }
 
-/** Editable, persistent user identity. Photo changes also refresh the extracted palette. */
+/** Editable profile with immediate preview and safe photo persistence. */
 @Composable
 fun CustomizeProfileScreen(onBack: () -> Unit) {
     val context = LocalContext.current
     var name by remember { mutableStateOf(UserProfile.name) }
     var selectedPhoto by remember { mutableStateOf<Uri?>(null) }
-    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { selectedPhoto = it }
+    var error by remember { mutableStateOf<String?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) {
+            selectedPhoto = uri
+            error = null
+        }
+    }
     Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
             TextButton(onClick = onBack) { Text("Back") }
             Text("Customize Profile", style = MaterialTheme.typography.titleLarge)
         }
-        UserPhoto(Modifier.size(112.dp).clip(CircleShape))
+        val preview = remember(selectedPhoto) {
+            selectedPhoto?.let { uri ->
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { stream ->
+                        BitmapFactory.decodeStream(stream)?.asImageBitmap()
+                    }
+                } catch (_: Exception) { null }
+            }
+        }
+        if (preview != null) {
+            Image(bitmap = preview, contentDescription = "Selected profile picture",
+                modifier = Modifier.size(112.dp).clip(CircleShape), contentScale = ContentScale.Crop)
+        } else {
+            UserPhoto(Modifier.size(112.dp).clip(CircleShape))
+        }
         Button(onClick = { picker.launch("image/*") }) { Text("Change Profile Picture") }
-        if (selectedPhoto != null) Text("New picture selected")
-        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("User Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-        Button(onClick = { UserProfile.save(context, name, selectedPhoto); onBack() }, enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Save Profile") }
+        if (selectedPhoto != null) Text("New picture selected — tap Save Profile to apply")
+        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("User Name") },
+            singleLine = true, modifier = Modifier.fillMaxWidth())
+        error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+        Button(onClick = {
+            if (UserProfile.save(context, name, selectedPhoto)) onBack()
+            else error = "Unable to save this photo. Choose another image and try again."
+        }, enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Save Profile") }
     }
 }

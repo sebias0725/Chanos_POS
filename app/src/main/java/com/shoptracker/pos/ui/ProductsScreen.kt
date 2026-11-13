@@ -58,16 +58,7 @@ fun ProductsScreen(vm: MainViewModel, onBack: () -> Unit) {
     var deleting by remember { mutableStateOf<Product?>(null) }
     var managingCategories by remember { mutableStateOf(false) }
 
-    // Products grouped by category (categories A-Z, then Uncategorized). A product whose category id
-    // no longer exists is treated as Uncategorized, so nothing can ever drop out of the list.
-    val groups = remember(products, categories) {
-        val known = categories.map { it.id }.toSet()
-        val byCat = products.groupBy { if (it.categoryId != null && it.categoryId in known) it.categoryId else null }
-        buildList {
-            categories.forEach { c -> byCat[c.id]?.let { add(c.name to it) } }
-            byCat[null]?.let { add(UNCATEGORIZED_LABEL to it) }
-        }
-    }
+    val groups = remember(products, categories) { groupedProducts(products, categories) }
     val showHeaders = categories.isNotEmpty()
 
     Column(Modifier.fillMaxSize()) {

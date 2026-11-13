@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.items
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -72,12 +73,14 @@ fun MainScreen(
     onOpenDay: (Long) -> Unit
 ) {
     val products by vm.products.collectAsState()
+    val categories by vm.categories.collectAsState()
     val day by vm.openDay.collectAsState()
     val allDays by vm.allDays.collectAsState()
     val confirmTaps by vm.confirmTaps.collectAsState()
     val data = rememberDayData(vm, setOfNotNull(day?.id))
     val stats = data.stats
     val active = remember(products) { products.filter { it.active } }
+    val productGroups = remember(active, categories) { groupedProducts(active, categories) }
     val lastSale = remember(data) { data.txns.lastOrNull { it.status == STATUS_COMPLETED } }
     val haptic = LocalHapticFeedback.current
 
@@ -137,16 +140,23 @@ fun MainScreen(
                         verticalArrangement = Arrangement.spacedBy(10.dp),
                         horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        items(active, key = { it.id }) { p ->
-                            val s = byId[p.id]
-                            ProductCard(
-                                product = p,
-                                units = s?.units ?: 0,
-                                revenue = s?.revenue ?: 0L,
-                                enabled = day != null,
-                                onAdd = { request(p, true) },
-                                onRemove = { request(p, false) }
-                            )
+                        productGroups.forEach { (categoryName, categoryProducts) ->
+                            item(key = "category:$categoryName", span = { GridItemSpan(maxLineSpan) }) {
+                                Text(categoryName, style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
+                            }
+                            items(categoryProducts, key = { it.id }) { p ->
+                                val s = byId[p.id]
+                                ProductCard(
+                                    product = p,
+                                    units = s?.units ?: 0,
+                                    revenue = s?.revenue ?: 0L,
+                                    enabled = day != null,
+                                    onAdd = { request(p, true) },
+                                    onRemove = { request(p, false) }
+                                )
+                            }
                         }
                     }
                 }

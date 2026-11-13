@@ -50,6 +50,7 @@ import com.shoptracker.pos.util.Fmt
 fun NewOrderScreen(vm: MainViewModel, onBack: () -> Unit, onDone: () -> Unit) {
     val day by vm.openDay.collectAsState()
     val products by vm.products.collectAsState()
+    val categories by vm.categories.collectAsState()
     val rates by vm.rates.collectAsState()
     val active = remember(products) { products.filter { it.active } }
 
@@ -64,7 +65,7 @@ fun NewOrderScreen(vm: MainViewModel, onBack: () -> Unit, onDone: () -> Unit) {
                 "No active products",
                 "Add or enable products first in \"Products\"."
             )
-            else -> OrderForm(vm, active, rates, onDone)
+            else -> OrderForm(vm, active, categories, rates, onDone)
         }
     }
 }
@@ -73,6 +74,7 @@ fun NewOrderScreen(vm: MainViewModel, onBack: () -> Unit, onDone: () -> Unit) {
 private fun OrderForm(
     vm: MainViewModel,
     products: List<Product>,
+    categories: List<com.shoptracker.pos.data.Category>,
     rates: List<DeliveryRate>,
     onDone: () -> Unit
 ) {
@@ -177,14 +179,15 @@ private fun OrderForm(
             )
 
             Text("Items", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-            products.forEach { p ->
-                QtyRow(p, qty[p.id] ?: 0) { n ->
-                    if (n <= 0) {
-                        qty.remove(p.id)
-                    } else {
-                        qty[p.id] = n
+            groupedProducts(products, categories).forEach { (categoryName, categoryProducts) ->
+                Text(categoryName, style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.padding(top = 8.dp))
+                categoryProducts.forEach { p ->
+                    QtyRow(p, qty[p.id] ?: 0) { n ->
+                        if (n <= 0) qty.remove(p.id) else qty[p.id] = n
+                        Unit
                     }
-                    Unit
                 }
             }
 
