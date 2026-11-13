@@ -6,6 +6,7 @@ import android.graphics.Color as AndroidColor
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -108,5 +109,25 @@ fun CreateUserScreen(onCreated: () -> Unit) {
         Button(onClick = { UserProfile.save(context, name, photo); onCreated() }, enabled = name.isNotBlank() && photo != null, modifier = Modifier.fillMaxWidth()) {
             Text("Create User")
         }
+    }
+}
+
+/** Editable, persistent user identity. Photo changes also refresh the extracted palette. */
+@Composable
+fun CustomizeProfileScreen(onBack: () -> Unit) {
+    val context = LocalContext.current
+    var name by remember { mutableStateOf(UserProfile.name) }
+    var selectedPhoto by remember { mutableStateOf<Uri?>(null) }
+    val picker = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { selectedPhoto = it }
+    Column(Modifier.fillMaxSize().padding(20.dp), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            TextButton(onClick = onBack) { Text("Back") }
+            Text("Customize Profile", style = MaterialTheme.typography.titleLarge)
+        }
+        UserPhoto(Modifier.size(112.dp).clip(CircleShape))
+        Button(onClick = { picker.launch("image/*") }) { Text("Change Profile Picture") }
+        if (selectedPhoto != null) Text("New picture selected")
+        OutlinedTextField(value = name, onValueChange = { name = it }, label = { Text("User Name") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+        Button(onClick = { UserProfile.save(context, name, selectedPhoto); onBack() }, enabled = name.isNotBlank(), modifier = Modifier.fillMaxWidth()) { Text("Save Profile") }
     }
 }

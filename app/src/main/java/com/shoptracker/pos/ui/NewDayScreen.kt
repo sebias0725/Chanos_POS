@@ -50,6 +50,8 @@ fun NewDayScreen(vm: MainViewModel, onBack: () -> Unit, onDone: () -> Unit) {
 private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit) {
     val data = rememberDayData(vm, setOf(day.id))
     val stats = data.stats
+    val products by vm.products.collectAsState()
+    val lowStock = products.filter { it.active && it.stock <= 5 }.sortedWith(compareBy({ it.stock }, { it.name }))
 
     var finalCash by remember { mutableStateOf("") }
     var remit by remember { mutableStateOf("") }
@@ -106,6 +108,13 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
                 )
                 OutlinedButton(onClick = { addingExpense = true }, modifier = Modifier.fillMaxWidth()) {
                     Text("Add expense")
+                }
+            }
+
+            SectionCard("Stock alerts (5 or fewer remaining)") {
+                if (lowStock.isEmpty()) Text("No low-stock products.")
+                else lowStock.forEach { product ->
+                    LabelValue(product.name, if (product.stock == 0) "OUT OF STOCK" else "${product.stock} left")
                 }
             }
 
@@ -170,7 +179,8 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
                 Text(
                     "No more sales, orders or expenses can be recorded for ${Fmt.shortDate(day.openedAt)} after closing.\n\n" +
                         "Cash on hand: ${Fmt.peso(cashC)}\nRemit: ${Fmt.peso(remitC)}\n" +
-                        "Final floating money: ${Fmt.peso(floatC)}"
+                        "Final floating money: ${Fmt.peso(floatC)}" +
+                        "\n\nStock alerts:\n" + (if (lowStock.isEmpty()) "None" else lowStock.joinToString("\n") { "${it.name}: ${it.stock} remaining" })
                 )
             },
             confirmButton = {

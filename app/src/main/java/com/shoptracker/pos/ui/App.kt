@@ -1,6 +1,8 @@
 package com.shoptracker.pos.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.height
@@ -50,6 +52,7 @@ sealed interface Screen {
     data class DayDetail(val dayId: Long) : Screen
     data object Chart : Screen
     data object Compare : Screen
+    data object Profile : Screen
     data object NewDay : Screen
 }
 
@@ -111,6 +114,7 @@ fun App(vm: MainViewModel) {
                     onCompare = { push(Screen.Compare) },
                     onOpenDay = { push(Screen.DayDetail(it)) }
                 )
+                Screen.Profile -> CustomizeProfileScreen(onBack = { pop() })
                 Screen.Products -> ProductsScreen(vm, onBack = { pop() })
                 Screen.Orders -> OrdersScreen(vm, onBack = { pop() }, onNewOrder = { push(Screen.NewOrder) })
                 Screen.NewOrder -> NewOrderScreen(vm, onBack = { pop() }, onDone = { pop() })
@@ -130,11 +134,11 @@ fun App(vm: MainViewModel) {
                 Screen.NewDay -> NewDayScreen(vm, onBack = { pop() }, onDone = { pop() })
             }
                 // A small edge handle remains available without resizing the dashboard.
-                if (!sidebar) {
+                if (!sidebar && screen == Screen.Main) {
                     androidx.compose.material3.Button(
                         onClick = { sidebar = true },
                         modifier = Modifier.align(androidx.compose.ui.Alignment.BottomStart)
-                            .padding(bottom = 18.dp)
+                            .padding(bottom = 100.dp)
                             .width(42.dp)
                             .height(52.dp),
                         contentPadding = androidx.compose.foundation.layout.PaddingValues(0.dp),
@@ -143,7 +147,7 @@ fun App(vm: MainViewModel) {
                         )
                     ) { Text("›", color = MaterialTheme.colorScheme.onPrimary, style = MaterialTheme.typography.titleLarge) }
                 }
-                if (sidebar) {
+                if (sidebar && screen == Screen.Main) {
                     // Tap outside the panel to dismiss; no underlying dashboard interaction.
                     Box(
                         Modifier.fillMaxSize()
@@ -168,8 +172,12 @@ fun App(vm: MainViewModel) {
                                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Text(UserProfile.name, style = MaterialTheme.typography.titleMedium,
-                                    modifier = Modifier.weight(1f))
+                                androidx.compose.material3.IconButton(
+                                    onClick = { sidebar = false; push(Screen.Profile) },
+                                    modifier = Modifier.weight(1f).height(78.dp)
+                                ) {
+                                    UserPhoto(Modifier.size(64.dp).clip(androidx.compose.foundation.shape.CircleShape))
+                                }
                                 androidx.compose.material3.IconButton(onClick = { sidebar = false }) {
                                     Text("‹", style = MaterialTheme.typography.titleLarge)
                                 }

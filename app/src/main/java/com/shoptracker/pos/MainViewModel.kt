@@ -152,7 +152,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val ok: Boolean = db.withTransaction {
                     val day = dayDao.getOpen() ?: return@withTransaction false
                     val p = productDao.getById(product.id) ?: return@withTransaction false
-                    if (!p.active) return@withTransaction false
+                    if (!p.active || p.stock < 1) return@withTransaction false
                     txDao.insert(
                         SalesTransaction(
                             businessDayId = day.id,
@@ -168,7 +168,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     productDao.adjustStock(p.id, -1)
                     true
                 }
-                if (!ok) say("Sale not recorded: no active business day or product disabled")
+                if (!ok) say("Sale not recorded: no active day, disabled product, or out of stock")
             } catch (e: Exception) {
                 say("Could not save sale: ${e.message}")
             }
@@ -256,6 +256,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     val day = dayDao.getOpen() ?: return@withTransaction false
                     val lines = items.filter { it.second > 0 }
                     if (lines.isEmpty()) return@withTransaction false
+                    // Check all quantities before inserting any order or transaction.
+                    val requested = lines.groupBy { it.first }.mapValues { entry -> entry.value.sumOf { it.second } }
+                    for ((productId, quantity) in requested) {
+                        val product = productDao.getById(productId) ?: return@withTransaction false
+                        if (!product.active || quantity > product.stock) return@withTransaction false
+                    }
                     val now = System.currentTimeMillis()
                     val orderId = orderDao.insert(
                         SalesOrder(
@@ -292,7 +298,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     if (inserted == 0) throw IllegalStateException("None of the products exist any more")
                     true
                 }
-                say(if (ok) "Order saved" else "Order not saved: no active business day")
+                say(if (ok) "Order saved" else "Order not saved: check active day and available stock")
             } catch (e: Exception) {
                 say("Could not save order: ${e.message}")
             }
@@ -530,6 +536,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     // ---------------- products ----------------
 
     fun addProduct(name: String, priceCentavos: Long, profitCentavos: Long, stock: Int, categoryId: Long? = null) {
+        if (stock < 0) { say("Stock cannot be negative"); return }
         viewModelScope.launch {
             try {
                 productDao.insert(
@@ -548,6 +555,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     fun updateProduct(product: Product) {
+        if (product.stock < 0) { say("Stock cannot be negative"); return }
         viewModelScope.launch {
             try {
                 productDao.update(product.copy(categoryId = validCategoryId(product.categoryId)))

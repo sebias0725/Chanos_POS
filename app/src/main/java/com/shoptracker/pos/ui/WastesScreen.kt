@@ -47,7 +47,7 @@ fun WastesScreen(vm: MainViewModel, onBack: () -> Unit) {
                 }
             }
             OutlinedTextField(value = note, onValueChange = { note = it }, label = { Text("Notes (optional)") })
-            Button(enabled = productId != null && (qty.toIntOrNull() ?: 0) > 0, onClick = {
+            Button(enabled = productId != null && (qty.toIntOrNull() ?: 0) > 0 && (qty.toIntOrNull() ?: 0) <= (products.firstOrNull { it.id == productId }?.stock ?: 0), onClick = {
                 productId?.let { vm.recordWaste(it, qty.toIntOrNull() ?: 0, reason, note) }
                 note = ""; qty = "1"
             }) { Text("Record waste") }

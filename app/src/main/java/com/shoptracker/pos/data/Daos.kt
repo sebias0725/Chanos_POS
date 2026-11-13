@@ -24,8 +24,8 @@ interface ProductDao {
     @Delete
     suspend fun delete(product: Product)
 
-    @Query("UPDATE products SET stock = stock + :delta WHERE id = :id")
-    suspend fun adjustStock(id: Long, delta: Int)
+    @Query("UPDATE products SET stock = stock + :delta WHERE id = :id AND stock + :delta >= 0")
+    suspend fun adjustStock(id: Long, delta: Int): Int
 
     @Query("SELECT COUNT(*) FROM products WHERE categoryId = :categoryId")
     suspend fun countInCategory(categoryId: Long): Int

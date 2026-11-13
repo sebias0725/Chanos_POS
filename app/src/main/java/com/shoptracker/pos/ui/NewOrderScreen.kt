@@ -330,15 +330,15 @@ private fun QtyRow(product: Product, qty: Int, onChange: (Int) -> Unit) {
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
-        StepButton("−", onClick = { onChange(qty - 1) }, enabled = qty > 0)
+        StepButton("−", onClick = { onChange((qty - 1).coerceAtLeast(0)) }, enabled = qty > 0)
         OutlinedTextField(
             value = if (qty == 0) "" else qty.toString(),
-            onValueChange = { v -> if (v.length <= 4 && v.all { c -> c.isDigit() }) onChange(v.toIntOrNull() ?: 0) },
+            onValueChange = { v -> if (v.length <= 4 && v.all { c -> c.isDigit() }) onChange((v.toIntOrNull() ?: 0).coerceIn(0, product.stock.coerceAtLeast(0))) },
             placeholder = { Text("0") },
             singleLine = true,
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
             modifier = Modifier.width(84.dp)
         )
-        StepButton("+", onClick = { onChange(qty + 1) })
+        StepButton("+", onClick = { onChange(qty + 1) }, enabled = qty < product.stock)
     }
 }
