@@ -142,9 +142,19 @@ fun MainScreen(
                     ) {
                         productGroups.forEach { (categoryName, categoryProducts) ->
                             item(key = "category:$categoryName", span = { GridItemSpan(maxLineSpan) }) {
-                                Text(categoryName, style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.padding(top = 8.dp, bottom = 2.dp))
+                                Surface(
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    shape = RoundedCornerShape(12.dp),
+                                    modifier = Modifier.fillMaxWidth().padding(top = 12.dp, bottom = 4.dp)
+                                ) {
+                                    Text(
+                                        text = categoryName.uppercase(),
+                                        style = MaterialTheme.typography.titleMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp)
+                                    )
+                                }
                             }
                             items(categoryProducts, key = { it.id }) { p ->
                                 val s = byId[p.id]
