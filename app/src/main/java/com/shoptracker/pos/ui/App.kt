@@ -44,6 +44,8 @@ sealed interface Screen {
     data object Products : Screen
     data object Orders : Screen
     data object NewOrder : Screen
+    data class EditOrder(val id: Long) : Screen
+    data object Settings : Screen
     data object Expenses : Screen
     data object Wastes : Screen
     data object Export : Screen
@@ -116,7 +118,9 @@ fun App(vm: MainViewModel) {
                 )
                 Screen.Profile -> CustomizeProfileScreen(onBack = { pop() })
                 Screen.Products -> ProductsScreen(vm, onBack = { pop() })
-                Screen.Orders -> OrdersScreen(vm, onBack = { pop() }, onNewOrder = { push(Screen.NewOrder) })
+                Screen.Orders -> OrdersScreen(vm, onBack = { pop() }, onNewOrder = { push(Screen.NewOrder) }, onEditOrder = { push(Screen.EditOrder(it)) })
+                is Screen.EditOrder -> EditOrderScreen(vm, screen.id, onBack = { pop() })
+                Screen.Settings -> SettingsScreen(vm, onBack = { pop() })
                 Screen.NewOrder -> NewOrderScreen(vm, onBack = { pop() }, onDone = { pop() })
                 Screen.Expenses -> ExpensesScreen(vm, onBack = { pop() })
                 Screen.Wastes -> WastesScreen(vm, onBack = { pop() })
@@ -187,7 +191,8 @@ fun App(vm: MainViewModel) {
                                 "Orders" to Screen.Orders, "Expenses" to Screen.Expenses,
                                 "Wastes" to Screen.Wastes, "Delivery Rates" to Screen.Rates,
                                 "History" to Screen.History, "Chart" to Screen.Chart,
-                                "Compare" to Screen.Compare, "Export" to Screen.Export
+                                "Compare" to Screen.Compare, "Export" to Screen.Export,
+                                "Settings" to Screen.Settings
                             ).forEach { (label, destination) ->
                                 androidx.compose.material3.TextButton(
                                     onClick = {

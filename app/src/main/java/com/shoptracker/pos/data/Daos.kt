@@ -81,6 +81,9 @@ interface BusinessDayDao {
 
     @Update
     suspend fun update(day: BusinessDay)
+
+    @Query("DELETE FROM business_days WHERE id = :id")
+    suspend fun deleteById(id: Long)
 }
 
 @Dao
@@ -113,6 +116,12 @@ interface TransactionDao {
     @Insert
     suspend fun insert(tx: SalesTransaction): Long
 
+    @Query("DELETE FROM sales_transactions WHERE orderId = :orderId")
+    suspend fun deleteByOrder(orderId: Long)
+
+    @Query("DELETE FROM sales_transactions WHERE businessDayId = :dayId")
+    suspend fun deleteByDay(dayId: Long)
+
     @Query("SELECT productId AS productId, SUM(quantity) AS units, SUM(totalCentavos) AS revenue FROM sales_transactions WHERE status = 'COMPLETED' GROUP BY productId")
     fun observeLifetime(): Flow<List<ProductTotal>>
 }
@@ -143,6 +152,12 @@ interface OrderDao {
 
     @Update
     suspend fun update(order: SalesOrder)
+
+    @Query("DELETE FROM orders WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
+    @Query("DELETE FROM orders WHERE businessDayId = :dayId")
+    suspend fun deleteByDay(dayId: Long)
 }
 
 @Dao
@@ -161,6 +176,9 @@ interface ExpenseDao {
 
     @Delete
     suspend fun delete(expense: Expense)
+
+    @Query("DELETE FROM expenses WHERE businessDayId = :dayId")
+    suspend fun deleteByDay(dayId: Long)
 }
 
 @Dao
@@ -170,6 +188,12 @@ interface WasteDao {
 
     @Insert
     suspend fun insert(waste: Waste): Long
+
+    @Query("SELECT * FROM wastes WHERE businessDayId = :dayId")
+    suspend fun getAllForDay(dayId: Long): List<Waste>
+
+    @Query("DELETE FROM wastes WHERE businessDayId = :dayId")
+    suspend fun deleteByDay(dayId: Long)
 
     @Query("DELETE FROM wastes WHERE id = :id")
     suspend fun deleteById(id: Long)

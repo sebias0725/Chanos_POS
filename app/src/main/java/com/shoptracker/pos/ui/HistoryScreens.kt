@@ -46,6 +46,7 @@ fun HistoryScreen(vm: MainViewModel, onBack: () -> Unit, onOpenDay: (Long) -> Un
     val days by vm.allDays.collectAsState()
     val txns by vm.allTxns.collectAsState()
     val orders by vm.allOrders.collectAsState()
+    var deletingDay by remember { mutableStateOf<BusinessDay?>(null) }
 
     val totals: Map<Long, DayStats> = remember(days, txns, orders) {
         val tx = txns.groupBy { it.businessDayId }
@@ -83,6 +84,7 @@ fun HistoryScreen(vm: MainViewModel, onBack: () -> Unit, onOpenDay: (Long) -> Un
                                 )
                             }
                             Column(horizontalAlignment = Alignment.End) {
+                                if (!d.isOpen) TextButton(onClick = { deletingDay = d }) { Text("Delete day", color = MaterialTheme.colorScheme.error) }
                                 Text(Fmt.peso(tot?.gross ?: 0L), style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                                 Text("${tot?.units ?: 0} units", style = MaterialTheme.typography.labelMedium)
                             }
@@ -92,7 +94,13 @@ fun HistoryScreen(vm: MainViewModel, onBack: () -> Unit, onOpenDay: (Long) -> Un
             }
         }
     }
-}
+    deletingDay?.let { d ->
+        AlertDialog(onDismissRequest = { deletingDay = null }, title = { Text("Permanently delete business day?") },
+            text = { Text("${Fmt.date(d.openedAt)}: all orders, sales, expenses and wastes will be deleted. Inventory will be restored for completed sales and wastes. This cannot be undone.") },
+            confirmButton = { TextButton(onClick = { vm.deleteBusinessDay(d.id); deletingDay = null }) { Text("Delete day permanently") } },
+            dismissButton = { TextButton(onClick = { deletingDay = null }) { Text("Keep day") } })
+    }
+} 
 
 @Composable
 fun DayDetailScreen(

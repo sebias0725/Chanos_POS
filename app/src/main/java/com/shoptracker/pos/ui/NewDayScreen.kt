@@ -51,7 +51,8 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
     val data = rememberDayData(vm, setOf(day.id))
     val stats = data.stats
     val products by vm.products.collectAsState()
-    val lowStock = products.filter { it.active && it.stock <= 5 }.sortedWith(compareBy({ it.stock }, { it.name }))
+    val lowStockThreshold = androidx.compose.ui.platform.LocalContext.current.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).getInt("low_stock_threshold", 5)
+    val lowStock = products.filter { it.active && it.stock <= lowStockThreshold }.sortedWith(compareBy({ it.stock }, { it.name }))
 
     var finalCash by remember { mutableStateOf("") }
     var remit by remember { mutableStateOf("") }

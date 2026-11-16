@@ -306,6 +306,91 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /** Atomically replace all editable fields and sale lines; restore old stock before checking new quantities. */
+    fun editOrder(orderId: Long, updated: SalesOrder, items: Map<Long, Pair<Int, Long>>, onResult: (Boolean) -> Unit) {
+        viewModelScope.launch {
+            val ok = try {
+                db.withTransaction {
+                    val old = orderDao.getById(orderId) ?: return@withTransaction false
+                    val day = dayDao.getById(old.businessDayId) ?: return@withTransaction false
+                    if (!day.isOpen || old.status != STATUS_COMPLETED || items.isEmpty()) return@withTransaction false
+                    if (updated.deliveryFeeCentavos < 0 || items.values.any { it.first <= 0 || it.second < 0 }) return@withTransaction false
+                    val oldLines = txDao.getByOrder(orderId).filter { it.status == STATUS_COMPLETED }
+                    val restore = oldLines.groupBy { it.productId }.mapValues { e -> e.value.sumOf { it.quantity } }
+                    for ((id, item) in items) {
+                        val product = productDao.getById(id) ?: return@withTransaction false
+                        if (!product.active || item.first > product.stock + (restore[id] ?: 0)) return@withTransaction false
+                    }
+                    oldLines.forEach { if (productDao.adjustStock(it.productId, it.quantity) == 0) error("Could not restore stock") }
+                    txDao.deleteByOrder(orderId)
+                    val now = System.currentTimeMillis()
+                    items.forEach { (id, item) ->
+                        val product = productDao.getById(id) ?: error("Missing product")
+                        if (productDao.adjustStock(id, -item.first) == 0) error("Insufficient stock")
+                        txDao.insert(SalesTransaction(businessDayId = old.businessDayId, productId = id,
+                            productName = product.name, unitPriceCentavos = item.second, quantity = item.first,
+                            totalCentavos = item.second * item.first, timestamp = old.createdAt,
+                            unitProfitCentavos = product.profitCentavos, orderId = orderId))
+                    }
+                    orderDao.update(updated.copy(id = old.id, businessDayId = old.businessDayId,
+                        createdAt = old.createdAt, status = old.status, cancelledAt = old.cancelledAt))
+                    true
+                }
+            } catch (e: Exception) { say("Edit failed: ${e.message}"); false }
+            say(if (ok) "Order updated" else "Order not updated: check stock and active business day")
+            onResult(ok)
+        }
+    }
+
+    /** Permanent deletion of an order. Never restore stock for a previously cancelled order. */
+    fun deleteOrder(orderId: Long, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = try {
+                db.withTransaction {
+                    val order = orderDao.getById(orderId) ?: return@withTransaction false
+                    if (dayDao.getById(order.businessDayId)?.isOpen != true) return@withTransaction false
+                    if (order.status == STATUS_COMPLETED) {
+                        txDao.getByOrder(orderId).filter { it.status == STATUS_COMPLETED }.forEach {
+                            if (productDao.adjustStock(it.productId, it.quantity) == 0) error("Stock restore failed")
+                        }
+                    }
+                    txDao.deleteByOrder(orderId)
+                    orderDao.deleteById(orderId)
+                    true
+                }
+            } catch (e: Exception) { say("Delete failed: ${e.message}"); false }
+            say(if (ok) "Order permanently deleted" else "Cannot delete order from a closed business day")
+            onResult(ok)
+        }
+    }
+
+    /** Remove a closed test day and all its records in one database transaction. */
+    fun deleteBusinessDay(dayId: Long, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = try {
+                db.withTransaction {
+                    val day = dayDao.getById(dayId) ?: return@withTransaction false
+                    if (day.isOpen) return@withTransaction false
+                    txDao.getForDay(dayId).filter { it.status == STATUS_COMPLETED }.forEach {
+                        if (productDao.adjustStock(it.productId, it.quantity) == 0) error("Stock restore failed")
+                    }
+                    // Wastes also deducted inventory; restore only this day's wastes.
+                    wasteDao.getAllForDay(dayId).forEach {
+                        if (productDao.adjustStock(it.productId, it.quantity) == 0) error("Waste restore failed")
+                    }
+                    txDao.deleteByDay(dayId)
+                    orderDao.deleteByDay(dayId)
+                    expenseDao.deleteByDay(dayId)
+                    wasteDao.deleteByDay(dayId)
+                    dayDao.deleteById(dayId)
+                    true
+                }
+            } catch (e: Exception) { say("Day deletion failed: ${e.message}"); false }
+            say(if (ok) "Business day permanently deleted" else "Could not delete day; close it first")
+            onResult(ok)
+        }
+    }
+
     /** Edits the preferred delivery time of an existing delivery order (allowed at any time). */
     fun updateDeliveryTime(orderId: Long, time: String) {
         viewModelScope.launch {

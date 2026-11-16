@@ -17,6 +17,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import com.shoptracker.pos.data.BusinessDay
+import com.shoptracker.pos.data.DayData
+import java.time.LocalDate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -49,44 +54,53 @@ import com.shoptracker.pos.util.Fmt
 
 /** Orders of the open business day (or of the latest day when none is open). */
 @Composable
-fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) {
+fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit, onEditOrder: (Long) -> Unit) {
     val open by vm.openDay.collectAsState()
-    val day = open
-    val data = rememberDayData(vm, setOfNotNull(day?.id))
+    val days by vm.allDays.collectAsState()
+    val today = Fmt.localDate(System.currentTimeMillis())
+    var selectedDate by remember { mutableStateOf(today) }
+    var showDatePicker by remember { mutableStateOf(false) }
+    // A calendar date may have multiple business sessions. Include all of them.
+    val selectedDays = remember(days, selectedDate) {
+        days.filter { Fmt.localDate(it.openedAt) == selectedDate }
+    }
+    val day = selectedDays.firstOrNull { it.isOpen } ?: selectedDays.firstOrNull()
+    val data = rememberDayData(vm, selectedDays.map { it.id }.toSet())
     var cancelling by remember { mutableStateOf<SalesOrder?>(null) }
+    var deleting by remember { mutableStateOf<SalesOrder?>(null) }
     var editingTime by remember { mutableStateOf<SalesOrder?>(null) }
     var details by remember { mutableStateOf<SalesOrder?>(null) }
     var copied by remember { mutableStateOf(false) }
     val context = LocalContext.current
-    val orders = remember(data) { data.orders.filter { it.status == STATUS_COMPLETED }.sortedWith(compareBy<SalesOrder> { deliverySortKey(it.deliveryTime) }.thenBy { it.createdAt }) }
+    val reportPrefs = remember { context.getSharedPreferences("settings", Context.MODE_PRIVATE) }
+    val orders = remember(data) {
+        data.orders.filter { it.status == STATUS_COMPLETED || it.status == com.shoptracker.pos.data.STATUS_CANCELLED }
+            .sortedWith(compareBy<SalesOrder> { deliverySortKey(it.deliveryTime) }.thenBy { it.createdAt })
+    }
     fun copyOrders() {
-        val body = buildString {
-            append("‼️ Today's Orders")
-            orders.forEachIndexed { index, o ->
-                val lines = data.txns.filter { it.orderId == o.id && it.status == STATUS_COMPLETED }
-                append("\n\n${index + 1}. ${o.customerName.ifBlank { "Customer #${o.id}" }}${if (o.delivered) (if (o.type == ORDER_DELIVERY) " [✅ Delivered]" else " [✅ Picked Up]") else ""}")
-                append("\n- ")
-                append(lines.joinToString(", ") { "${it.quantity}x ${it.productName}" })
-                val total = lines.sumOf { it.totalCentavos } + o.deliveryFeeCentavos
-                append("\n- ${Fmt.peso(total)} (${Fmt.peso(o.deliveryFeeCentavos)} df; ${o.paymentMethod.ifBlank { "Unspecified" }}; ${if (o.paid) "Paid" else "Pending"})")
-                append("\n- ${o.address.ifBlank { if (o.type == ORDER_DELIVERY) "Address not provided" else "Pickup" }}")
-                if (o.note.isNotBlank()) append("\n- Additional Notes: ${o.note}")
-                append("\n- Time: ${o.deliveryTime.ifBlank { "Pending" }}")
-            }
-        }
+        if (orders.isEmpty()) return
+        val included = if (reportPrefs.getBoolean("report_cancelled", true)) orders else orders.filter { it.status != com.shoptracker.pos.data.STATUS_CANCELLED }
+        val body = formatMessengerOrders(selectedDate, included, data, reportPrefs)
         val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        clipboard.setPrimaryClip(ClipData.newPlainText("Today's Orders", body))
+        clipboard.setPrimaryClip(ClipData.newPlainText("Orders ${Fmt.localDateText(selectedDate)}", body))
         copied = true
     }
 
     Column(Modifier.fillMaxSize()) {
-        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            ScreenHeader(if (day != null) "Orders • ${Fmt.dayMonth(day.openedAt)}" else "Orders", onBack)
-            IconButton(onClick = { copyOrders() }) {
-                Text("📋", style = MaterialTheme.typography.headlineSmall, color = MaterialTheme.colorScheme.primary)
+        ScreenHeader("Orders • ${Fmt.localDateText(selectedDate)}", onBack)
+        Row(
+            Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+        ) {
+            OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.weight(1f)) {
+                Text(if (selectedDate == today) "Today ▾" else "${Fmt.localDateText(selectedDate)} ▾")
+            }
+            Button(onClick = { copyOrders() }, enabled = orders.isNotEmpty(), modifier = Modifier.weight(1f)) {
+                Text("📋 Copy All Orders")
             }
         }
-        if (copied) Text("All orders copied to clipboard", modifier = Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
+        if (copied) Text("${orders.size} orders copied to clipboard", modifier = Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
         if (orders.isEmpty()) {
             EmptyState(
                 "No orders yet",
@@ -106,7 +120,7 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
                             .pointerInput(o.id, o.delivered) {
                                 detectHorizontalDragGestures(
                                     onDragEnd = {
-                                        if (swipeDistance < -100f && !o.delivered && day != null) vm.setOrderDelivered(o.id, true)
+                                        if (swipeDistance < -100f && !o.delivered && day?.isOpen == true) vm.setOrderDelivered(o.id, true)
                                         swipeDistance = 0f
                                     },
                                     onDragCancel = { swipeDistance = 0f },
@@ -131,12 +145,12 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
                             Column(horizontalAlignment = androidx.compose.ui.Alignment.End) {
                                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                     Text("Paid", style = MaterialTheme.typography.labelSmall)
-                                    Checkbox(checked = o.paid, onCheckedChange = { vm.setOrderPaid(o.id, it) }, enabled = day != null)
+                                    Checkbox(checked = o.paid, onCheckedChange = { vm.setOrderPaid(o.id, it) }, enabled = day?.isOpen == true && o.status == STATUS_COMPLETED)
                                 }
                                 Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                     Text(if (o.type == ORDER_DELIVERY) "Delivered" else "Picked Up",
                                         style = MaterialTheme.typography.labelSmall)
-                                    Checkbox(checked = o.delivered, onCheckedChange = { vm.setOrderDelivered(o.id, it) }, enabled = day != null)
+                                    Checkbox(checked = o.delivered, onCheckedChange = { vm.setOrderDelivered(o.id, it) }, enabled = day?.isOpen == true && o.status == STATUS_COMPLETED)
                                 }
                             }
                         }
@@ -151,6 +165,27 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
                 .padding(12.dp)
                 .height(56.dp)
         ) { Text("NEW ORDER", fontWeight = FontWeight.Bold) }
+    }
+
+    if (showDatePicker) {
+        val availableDates = days.map { Fmt.localDate(it.openedAt) }.distinct().sortedDescending()
+        AlertDialog(
+            onDismissRequest = { showDatePicker = false },
+            title = { Text("Select order date") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    OutlinedButton(onClick = { selectedDate = today; copied = false; showDatePicker = false }, modifier = Modifier.fillMaxWidth()) {
+                        Text("Today • ${Fmt.localDateText(today)}")
+                    }
+                    availableDates.filter { it != today }.forEach { date ->
+                        OutlinedButton(onClick = { selectedDate = date; copied = false; showDatePicker = false }, modifier = Modifier.fillMaxWidth()) {
+                            Text(Fmt.localDateText(date))
+                        }
+                    }
+                }
+            },
+            confirmButton = { TextButton(onClick = { showDatePicker = false }) { Text("Close") } }
+        )
     }
 
     details?.let { selected ->
@@ -168,15 +203,22 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
                     Text("Address: ${o.address}")
                     Text("Notes: ${o.note}")
                     Text("Delivery time: ${o.deliveryTime.ifBlank { "Pending" }}")
-                    if (o.type == ORDER_DELIVERY && day != null) {
+                    if (day?.isOpen == true && o.status == STATUS_COMPLETED) {
+                        OutlinedButton(onClick = { details = null; onEditOrder(o.id) }) { Text("Edit all order details") }
+                        OutlinedButton(onClick = { details = null; cancelling = o }) { Text("Cancel order") }
+                    }
+                    if (day?.isOpen == true) {
+                        OutlinedButton(onClick = { details = null; deleting = o }) { Text("Permanently delete order", color = MaterialTheme.colorScheme.error) }
+                    }
+                    if (o.type == ORDER_DELIVERY && day?.isOpen == true && o.status == STATUS_COMPLETED) {
                         OutlinedButton(onClick = { editingTime = o; details = null }) { Text("Edit delivery time") }
                     }
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Checkbox(checked = o.paid, onCheckedChange = { vm.setOrderPaid(o.id, it) })
+                        Checkbox(checked = o.paid, onCheckedChange = { vm.setOrderPaid(o.id, it) }, enabled = selectedDays.any { it.id == o.businessDayId && it.isOpen })
                         Text("Paid")
                     }
                     Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Checkbox(checked = o.delivered, onCheckedChange = { vm.setOrderDelivered(o.id, it) })
+                        Checkbox(checked = o.delivered, onCheckedChange = { vm.setOrderDelivered(o.id, it) }, enabled = selectedDays.any { it.id == o.businessDayId && it.isOpen })
                         Text(if (o.type == ORDER_DELIVERY) "Delivered (uncheck to reverse)" else "Picked Up (uncheck to reverse)")
                     }
                 }
@@ -200,6 +242,12 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
         )
     }
 
+    deleting?.let { o ->
+        AlertDialog(onDismissRequest = { deleting = null }, title = { Text("Delete order #${o.id} permanently?") },
+            text = { Text("This cannot be undone. Order and sale lines will be removed from the database. Stock will be restored only if the order was active.") },
+            confirmButton = { TextButton(onClick = { vm.deleteOrder(o.id); deleting = null }) { Text("Delete permanently") } },
+            dismissButton = { TextButton(onClick = { deleting = null }) { Text("Keep") } })
+    }
     cancelling?.let { o ->
         AlertDialog(
             onDismissRequest = { cancelling = null },
@@ -220,3 +268,37 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit) 
 
 /** Pending and invalid times appear after all specified times. */
 private fun deliverySortKey(time: String): Int = parseDeliveryMinutes(time) ?: Int.MAX_VALUE
+
+/** Plain-text Messenger report. Uses saved transaction snapshots, not current product prices. */
+internal fun formatMessengerOrders(date: LocalDate, orders: List<SalesOrder>, data: DayData, prefs: android.content.SharedPreferences? = null): String {
+    val today = Fmt.localDate(System.currentTimeMillis())
+    val title = if (date == today) (prefs?.getString("report_heading", "‼️Today's orders") ?: "‼️Today's orders") else "‼️Orders for ${Fmt.localDateText(date)}"
+    return buildString {
+        append(title)
+        orders.forEachIndexed { index, order ->
+            val lines = data.txns.filter { it.orderId == order.id && (it.status == STATUS_COMPLETED || order.status == com.shoptracker.pos.data.STATUS_CANCELLED) }
+            val status = when {
+                order.status == com.shoptracker.pos.data.STATUS_CANCELLED -> " [❌ Cancelled]"
+                order.delivered && order.type == ORDER_DELIVERY -> " [✅ Delivered]"
+                order.delivered -> " [✅ Picked Up]"
+                else -> " [⏳ Pending]"
+            }
+            append("\n\n${index + 1}. ${order.customerName.ifBlank { "Customer #${order.id}" }}$status")
+            if (lines.isNotEmpty()) append("\n- " + lines.joinToString(", ") { "${it.quantity}x ${it.productName}" })
+            val total = lines.sumOf { it.totalCentavos } + order.deliveryFeeCentavos
+            val annotations = mutableListOf<String>()
+            if (order.deliveryFeeCentavos > 0) annotations.add("${Fmt.peso(order.deliveryFeeCentavos)}df")
+            if (prefs?.getBoolean("report_payment", true) != false && order.paymentMethod.isNotBlank()) annotations.add(order.paymentMethod + if (order.paid) " paid" else "")
+            append("\n- ${Fmt.peso(total)}")
+            if (annotations.isNotEmpty()) append(" (${annotations.joinToString("; ")})")
+            if (prefs?.getBoolean("report_address", true) != false && order.address.isNotBlank()) append("\n- ${order.address.trim()}")
+            val time = order.deliveryTime.trim()
+            if (order.type == ORDER_DELIVERY) {
+                append("\n- DELIVER ${time.ifBlank { "Pending" }}")
+            } else {
+                append("\n- PICK UP ${time.ifBlank { "Pending" }}")
+            }
+            if (prefs?.getBoolean("report_notes", true) != false && order.note.isNotBlank()) append("\n- ${order.note.trim()}")
+        }
+    }
+}
