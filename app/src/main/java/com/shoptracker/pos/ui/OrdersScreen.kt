@@ -33,6 +33,16 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.size
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -96,8 +106,30 @@ fun OrdersScreen(vm: MainViewModel, onBack: () -> Unit, onNewOrder: () -> Unit, 
             OutlinedButton(onClick = { showDatePicker = true }, modifier = Modifier.weight(1f)) {
                 Text(if (selectedDate == today) "Today ▾" else "${Fmt.localDateText(selectedDate)} ▾")
             }
-            Button(onClick = { copyOrders() }, enabled = orders.isNotEmpty(), modifier = Modifier.weight(1f)) {
-                Text("📋 Copy All Orders")
+            FilledTonalIconButton(
+                onClick = { copyOrders() },
+                enabled = orders.isNotEmpty(),
+                modifier = Modifier.size(52.dp).semantics { contentDescription = "Copy all orders for selected date" }
+            ) {
+                val iconColor = MaterialTheme.colorScheme.onSecondaryContainer
+                Canvas(Modifier.size(25.dp)) {
+                    val line = 2.2.dp.toPx()
+                    // Two overlapping rounded rectangles, matching the requested copy icon.
+                    drawRoundRect(
+                        color = iconColor,
+                        topLeft = Offset(size.width * .34f, size.height * .08f),
+                        size = Size(size.width * .59f, size.height * .65f),
+                        cornerRadius = CornerRadius(3.dp.toPx()),
+                        style = Stroke(width = line)
+                    )
+                    drawRoundRect(
+                        color = iconColor,
+                        topLeft = Offset(size.width * .08f, size.height * .34f),
+                        size = Size(size.width * .59f, size.height * .59f),
+                        cornerRadius = CornerRadius(3.dp.toPx()),
+                        style = Stroke(width = line)
+                    )
+                }
             }
         }
         if (copied) Text("${orders.size} orders copied to clipboard", modifier = Modifier.padding(horizontal = 12.dp), color = MaterialTheme.colorScheme.primary)
