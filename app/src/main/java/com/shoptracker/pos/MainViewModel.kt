@@ -54,6 +54,25 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     private val rateDao = db.rateDao()
     private val categoryDao = db.categoryDao()
     private val wasteDao = db.wasteDao()
+    private val customerDao = db.customerDao()
+    val customers: StateFlow<List<com.shoptracker.pos.data.Customer>> =
+        customerDao.observeAll().stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun saveCustomer(customer: com.shoptracker.pos.data.Customer) {
+        viewModelScope.launch {
+            try {
+                if (customer.name.isBlank()) { say("Enter customer name"); return@launch }
+                if (customer.id == 0L) customerDao.insert(customer.copy(name = customer.name.trim()))
+                else customerDao.update(customer.copy(name = customer.name.trim()))
+                say("Customer saved")
+            } catch (e: Exception) { say("Could not save customer: ${e.message}") }
+        }
+    }
+
+    fun deleteCustomer(id: Long) { viewModelScope.launch {
+        customerDao.delete(id); say("Customer removed; historical orders retained")
+    } }
+
 
     private val prefs = app.getSharedPreferences("settings", Context.MODE_PRIVATE)
     private val _confirmTaps = MutableStateFlow(prefs.getBoolean("confirm_taps", true))
@@ -273,7 +292,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             note = note.trim(),
                             createdAt = now,
                             paymentMethod = paymentMethod,
-                            deliveryTime = if (type == ORDER_DELIVERY) deliveryTime else ""
+                            deliveryTime = deliveryTime
                         )
                     )
                     var inserted = 0

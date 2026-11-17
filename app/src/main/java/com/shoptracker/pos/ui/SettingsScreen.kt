@@ -9,6 +9,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.font.FontWeight
 import com.shoptracker.pos.MainViewModel
 
 /** Persistent preferences for operational defaults and reports. */
@@ -27,25 +28,26 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Settings & Customization", onBack)
         Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Text("Appearance", style = MaterialTheme.typography.titleMedium)
+            SettingsSection("Appearance")
             Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                 Text("Dark mode", Modifier.weight(1f)); Switch(dark, { dark = it; LocalThemePreference.dark = it; prefs.edit().putBoolean("dark_mode", it).apply() })
             }
-            Text("Inventory alerts", style = MaterialTheme.typography.titleMedium)
+            SettingsSection("Inventory alerts")
             OutlinedTextField(lowStock, { lowStock = it.filter(Char::isDigit).take(4) }, label = { Text("Low stock alert threshold (units)") }, modifier = Modifier.fillMaxWidth())
-            Text("Order reports", style = MaterialTheme.typography.titleMedium)
+            SettingsSection("Order reports")
             OutlinedTextField(heading, { heading = it }, label = { Text("Today's Messenger report heading") }, modifier = Modifier.fillMaxWidth())
 
             Toggle("Include customer notes", includeNotes, { includeNotes = it })
             Toggle("Include cancelled orders", includeCancelled, { includeCancelled = it })
             Toggle("Include payment details", includePayment, { includePayment = it })
             Toggle("Include delivery address", includeAddress, { includeAddress = it })
-            Text("Sales", style = MaterialTheme.typography.titleMedium)
+            SettingsSection("Sales")
             Toggle("Confirm product taps", confirm, { vm.setConfirmTaps(it) })
-            Text("Profile", style = MaterialTheme.typography.titleMedium)
+            SettingsSection("Profile")
             Text("Tap your profile picture in the Dashboard sidebar to change your business name and logo.")
-            Text("Data safety", style = MaterialTheme.typography.titleMedium)
-            Text("Order and day deletions require confirmation and cannot be undone. Back up important records before deleting a day.")
+            SettingsSection("Data safety")
+            Text("Order and day deletions require confirmation and cannot be undone.")
+            BackupControls()
         }
         Button(onClick = {
             prefs.edit().putInt("low_stock_threshold", lowStock.toIntOrNull()?.coerceIn(0, 9999) ?: 5)
@@ -60,4 +62,15 @@ fun SettingsScreen(vm: MainViewModel, onBack: () -> Unit) {
 @Composable
 private fun Toggle(label: String, checked: Boolean, onChange: (Boolean) -> Unit) {
  Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) { Text(label, Modifier.weight(1f)); Switch(checked, onChange) }
+}
+
+@Composable
+private fun SettingsSection(name: String) {
+    Surface(color = MaterialTheme.colorScheme.primaryContainer,
+        shape = androidx.compose.foundation.shape.RoundedCornerShape(12.dp),
+        modifier = Modifier.fillMaxWidth()) {
+        Text(name.uppercase(), color = MaterialTheme.colorScheme.onPrimaryContainer,
+            fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium,
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp))
+    }
 }

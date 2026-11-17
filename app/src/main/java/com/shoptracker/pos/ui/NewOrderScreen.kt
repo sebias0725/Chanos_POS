@@ -52,6 +52,7 @@ fun NewOrderScreen(vm: MainViewModel, onBack: () -> Unit, onDone: () -> Unit) {
     val products by vm.products.collectAsState()
     val categories by vm.categories.collectAsState()
     val rates by vm.rates.collectAsState()
+    val customers by vm.customers.collectAsState()
     val active = remember(products) { products.filter { it.active } }
 
     Column(Modifier.fillMaxSize()) {
@@ -65,7 +66,7 @@ fun NewOrderScreen(vm: MainViewModel, onBack: () -> Unit, onDone: () -> Unit) {
                 "No active products",
                 "Add or enable products first in \"Products\"."
             )
-            else -> OrderForm(vm, active, categories, rates, onDone)
+            else -> OrderForm(vm, active, categories, rates, customers, onDone)
         }
     }
 }
@@ -76,10 +77,16 @@ private fun OrderForm(
     products: List<Product>,
     categories: List<com.shoptracker.pos.data.Category>,
     rates: List<DeliveryRate>,
+    customers: List<com.shoptracker.pos.data.Customer>,
     onDone: () -> Unit
 ) {
     var type by remember { mutableStateOf(ORDER_PICKUP) }
     var customer by remember { mutableStateOf("") }
+    var chosenCustomer by remember { mutableStateOf<com.shoptracker.pos.data.Customer?>(null) }
+    var saveNewCustomer by remember { mutableStateOf(true) }
+    var customerPhone by remember { mutableStateOf("") }
+    var customerInstructions by remember { mutableStateOf("") }
+    var showSuggestions by remember { mutableStateOf(false) }
     var address by remember { mutableStateOf("") }
     var fee by remember { mutableStateOf("") }
     // null = "Custom" (manual amount). Otherwise the id of the chosen Delivery Rate; its fee is COPIED into `fee`.
@@ -116,12 +123,40 @@ private fun OrderForm(
 
             OutlinedTextField(
                 value = customer,
-                onValueChange = { if (it.length <= 60) customer = it },
+                onValueChange = { if (it.length <= 60) { customer = it; chosenCustomer = null; showSuggestions = true } },
                 label = { Text("Customer name (optional)") },
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text),
                 modifier = Modifier.fillMaxWidth()
             )
+
+            if (showSuggestions && customer.isNotBlank()) {
+                val matches = customers.filter { it.name.startsWith(customer.trim(), ignoreCase = true) }.take(8)
+                if (matches.isNotEmpty()) {
+                    androidx.compose.material3.Surface(tonalElevation = 3.dp, shape = androidx.compose.foundation.shape.RoundedCornerShape(10.dp)) {
+                        Column {
+                            matches.forEach { saved ->
+                                androidx.compose.material3.TextButton(onClick = {
+                                    chosenCustomer = saved; customer = saved.name; address = saved.address
+                                    fee = Fmt.plain(saved.deliveryFeeCentavos); selectedRateId = null
+                                    customerPhone = saved.phone; customerInstructions = saved.note; note = saved.note
+                                    showSuggestions = false
+                                }, modifier = Modifier.fillMaxWidth()) { Text(saved.name, modifier = Modifier.fillMaxWidth()) }
+                            }
+                        }
+                    }
+                }
+            }
+            if (chosenCustomer == null && customer.isNotBlank()) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    androidx.compose.material3.Checkbox(saveNewCustomer, { saveNewCustomer = it })
+                    Text("Save as customer for future orders")
+                }
+                if (saveNewCustomer) {
+                    OutlinedTextField(customerPhone, { customerPhone = it }, label = { Text("Customer phone (optional)") }, modifier = Modifier.fillMaxWidth())
+                    OutlinedTextField(customerInstructions, { customerInstructions = it }, label = { Text("Permanent customer instructions (optional)") }, modifier = Modifier.fillMaxWidth())
+                }
+            }
 
             if (delivery) {
                 OutlinedTextField(
@@ -161,7 +196,6 @@ private fun OrderForm(
                         error = if (showErrors && feeCentavos == null) "Enter the delivery fee (0 if free)" else null
                     )
                 }
-                DeliveryTimePicker(value = deliveryTime, onChange = { deliveryTime = it })
                 if (deliveryTime == DELIVERY_TIME_PENDING) {
                     Text(
                         "Pending = the customer has not confirmed a delivery time yet. You can change it later in Orders.",
@@ -170,6 +204,8 @@ private fun OrderForm(
                     )
                 }
             }
+
+            DeliveryTimePicker(value = deliveryTime, onChange = { deliveryTime = it }, label = if (delivery) "Preferred delivery time" else "Preferred pickup time")
 
             OptionDropdown(
                 label = "Payment method",
@@ -231,7 +267,7 @@ private fun OrderForm(
                         (if (customer.isNotBlank()) " • ${customer.trim()}" else "") + "\n" +
                         "$totalUnits units • items ${Fmt.peso(itemsTotal)}\n" +
                         (if (delivery) "Delivery fee ${Fmt.peso(feeCentavos)}\n" else "") +
-                        (if (delivery) "Delivery time: $deliveryTime\n" else "") +
+                        (if (delivery) "Delivery time: $deliveryTime\n" else "Pickup time: $deliveryTime\n") +
                         "Payment: $payment\n" +
                         "Total ${Fmt.peso(grandTotal)}\n\n" +
                         "It will be counted as sales of the current business day."
@@ -250,7 +286,16 @@ private fun OrderForm(
                             }
                             vm.createOrder(customer, type, address, feeCentavos, note, items, payment, deliveryTime) { ok ->
                                 busy = false
-                                if (ok) onDone()
+                                if (ok) {
+                                    if (chosenCustomer == null && saveNewCustomer && customer.isNotBlank() &&
+                                        customers.none { it.name.equals(customer.trim(), ignoreCase = true) }) {
+                                        vm.saveCustomer(com.shoptracker.pos.data.Customer(name = customer.trim(),
+                                            phone = customerPhone.trim(), address = address.trim(),
+                                            deliveryFeeCentavos = if (delivery) feeCentavos else 0L,
+                                            note = customerInstructions.trim()))
+                                    }
+                                    onDone()
+                                }
                             }
                         }
                     }

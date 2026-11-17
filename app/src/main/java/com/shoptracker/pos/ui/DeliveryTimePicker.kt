@@ -15,11 +15,11 @@ import java.util.Locale
 
 /** Exact hour/minute picker with a separate Pending selection. */
 @Composable
-fun DeliveryTimePicker(value: String, onChange: (String) -> Unit) {
+fun DeliveryTimePicker(value: String, onChange: (String) -> Unit, label: String = "Preferred delivery time") {
     val context = LocalContext.current
     val minutes = parseDeliveryMinutes(value)
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text("Preferred delivery time")
+        Text(label)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedButton(onClick = { onChange("Pending") }, modifier = Modifier.weight(1f)) {
                 Text(if (minutes == null) "✓ Pending" else "Pending")

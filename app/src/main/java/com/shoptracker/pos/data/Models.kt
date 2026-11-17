@@ -192,3 +192,14 @@ sealed interface ExportScope {
     data class Day(val dayId: Long) : ExportScope
     data object All : ExportScope
 }
+
+/** Saved contact details; orders remain historical snapshots and are linked by name. */
+@Entity(tableName = "customers", indices = [Index(value = ["name"], unique = true)])
+data class Customer(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val name: String,
+    val phone: String = "",
+    val address: String = "",
+    val deliveryFeeCentavos: Long = 0,
+    val note: String = ""
+)

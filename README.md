@@ -44,3 +44,10 @@ Close Day now takes Final cash on hand + Remit; Final floating money = Cash on h
 ### Known outstanding requirements / verification
 
 This is **not a fully verified implementation** of the entire requested specification. In particular, branding/logo-based palette, swipe-left delivery gesture, full editing of existing order line items, comprehensive waste history/export integration, financial reconciliation improvements, and end-to-end Android build/device verification remain outstanding. Do not replace a production installation without backing up its data and validating the APK first. No Gradle/Android SDK toolchain was available in the authoring environment, so successful compilation is not asserted.
+
+
+## v1.8.6 changes
+- Customers sidebar: saved customer profiles, editable defaults, order-history cards with expandable transaction details. Existing orders are matched by customer name (case-insensitive), so changing a saved customer's name will not automatically relink older orders.
+- New Order: starts-with autocomplete for saved customer names, default delivery address/fee and notes; optional save new customer. Pickup and delivery both have a preferred-time picker.
+- Settings: visually separated category headings and a portable ZIP database backup/restore. The backup contains the SQLite snapshot, settings, and profile photo. Save it outside the phone. Restore replaces all local app data and closes the app; reopen afterward.
+- Existing Room schema upgrades from v10 to v11 without dropping existing data.

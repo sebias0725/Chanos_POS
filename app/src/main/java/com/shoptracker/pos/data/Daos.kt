@@ -216,3 +216,13 @@ interface RateDao {
     @Delete
     suspend fun delete(rate: DeliveryRate)
 }
+
+@Dao
+interface CustomerDao {
+    @Query("SELECT * FROM customers ORDER BY name COLLATE NOCASE")
+    fun observeAll(): Flow<List<Customer>>
+    @Insert(onConflict = androidx.room.OnConflictStrategy.REPLACE)
+    suspend fun insert(customer: Customer): Long
+    @Update suspend fun update(customer: Customer)
+    @Query("DELETE FROM customers WHERE id = :id") suspend fun delete(id: Long)
+}

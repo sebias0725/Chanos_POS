@@ -45,6 +45,7 @@ sealed interface Screen {
     data object Orders : Screen
     data object NewOrder : Screen
     data class EditOrder(val id: Long) : Screen
+    data object Customers : Screen
     data object Settings : Screen
     data object Expenses : Screen
     data object Wastes : Screen
@@ -120,6 +121,7 @@ fun App(vm: MainViewModel) {
                 Screen.Products -> ProductsScreen(vm, onBack = { pop() })
                 Screen.Orders -> OrdersScreen(vm, onBack = { pop() }, onNewOrder = { push(Screen.NewOrder) }, onEditOrder = { push(Screen.EditOrder(it)) })
                 is Screen.EditOrder -> EditOrderScreen(vm, screen.id, onBack = { pop() })
+                Screen.Customers -> CustomersScreen(vm, onBack = { pop() })
                 Screen.Settings -> SettingsScreen(vm, onBack = { pop() })
                 Screen.NewOrder -> NewOrderScreen(vm, onBack = { pop() }, onDone = { pop() })
                 Screen.Expenses -> ExpensesScreen(vm, onBack = { pop() })
@@ -188,7 +190,7 @@ fun App(vm: MainViewModel) {
                             }
                             listOf(
                                 "Dashboard" to Screen.Main, "Products" to Screen.Products,
-                                "Orders" to Screen.Orders, "Expenses" to Screen.Expenses,
+                                "Orders" to Screen.Orders, "Customers" to Screen.Customers, "Expenses" to Screen.Expenses,
                                 "Wastes" to Screen.Wastes, "Delivery Rates" to Screen.Rates,
                                 "History" to Screen.History, "Chart" to Screen.Chart,
                                 "Compare" to Screen.Compare, "Export" to Screen.Export,
