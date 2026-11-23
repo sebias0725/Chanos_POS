@@ -14,7 +14,7 @@ const val ORDER_DELIVERY = "DELIVERY"
 
 /** Payment methods offered on an order. Stored as plain text on the order. */
 const val PAYMENT_COD = "COD"
-val PAYMENT_METHODS: List<String> = listOf(PAYMENT_COD, "QR", "Bank Transfer")
+val PAYMENT_METHODS: List<String> = listOf("Cash", "QR")
 
 /**
  * Preferred delivery time. "Pending" = the customer has not confirmed a time yet; it is ALWAYS the

@@ -266,6 +266,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
         items: List<Pair<Long, Int>>,
         paymentMethod: String,
         deliveryTime: String,
+        paymentPaid: Boolean,
         onResult: (Boolean) -> Unit
     ) {
         viewModelScope.launch {
@@ -292,7 +293,8 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                             note = note.trim(),
                             createdAt = now,
                             paymentMethod = paymentMethod,
-                            deliveryTime = deliveryTime
+                            deliveryTime = deliveryTime,
+                            paid = paymentPaid
                         )
                     )
                     var inserted = 0
@@ -332,7 +334,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 db.withTransaction {
                     val old = orderDao.getById(orderId) ?: return@withTransaction false
                     val day = dayDao.getById(old.businessDayId) ?: return@withTransaction false
-                    if (!day.isOpen || old.status != STATUS_COMPLETED || items.isEmpty()) return@withTransaction false
+                    if (old.status != STATUS_COMPLETED || items.isEmpty()) return@withTransaction false
                     if (updated.deliveryFeeCentavos < 0 || items.values.any { it.first <= 0 || it.second < 0 }) return@withTransaction false
                     val oldLines = txDao.getByOrder(orderId).filter { it.status == STATUS_COMPLETED }
                     val restore = oldLines.groupBy { it.productId }.mapValues { e -> e.value.sumOf { it.quantity } }
@@ -353,6 +355,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     orderDao.update(updated.copy(id = old.id, businessDayId = old.businessDayId,
                         createdAt = old.createdAt, status = old.status, cancelledAt = old.cancelledAt))
+                    recalculateClosedDay(old.businessDayId)
                     true
                 }
             } catch (e: Exception) { say("Edit failed: ${e.message}"); false }
@@ -367,7 +370,7 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             val ok = try {
                 db.withTransaction {
                     val order = orderDao.getById(orderId) ?: return@withTransaction false
-                    if (dayDao.getById(order.businessDayId)?.isOpen != true) return@withTransaction false
+                    if (dayDao.getById(order.businessDayId) == null) return@withTransaction false
                     if (order.status == STATUS_COMPLETED) {
                         txDao.getByOrder(orderId).filter { it.status == STATUS_COMPLETED }.forEach {
                             if (productDao.adjustStock(it.productId, it.quantity) == 0) error("Stock restore failed")
@@ -375,10 +378,11 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                     }
                     txDao.deleteByOrder(orderId)
                     orderDao.deleteById(orderId)
+                    recalculateClosedDay(order.businessDayId)
                     true
                 }
             } catch (e: Exception) { say("Delete failed: ${e.message}"); false }
-            say(if (ok) "Order permanently deleted" else "Cannot delete order from a closed business day")
+            say(if (ok) "Order permanently deleted" else "Could not delete order")
             onResult(ok)
         }
     }
@@ -430,8 +434,13 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
     fun setOrderPaid(orderId: Long, paid: Boolean) {
         viewModelScope.launch {
             try {
-                if (orderDao.setPaid(orderId, paid) == 0) say("Cannot update cancelled order")
-                else say(if (paid) "Marked paid" else "Marked unpaid")
+                val updated = db.withTransaction {
+                    val order = orderDao.getById(orderId) ?: return@withTransaction false
+                    if (orderDao.setPaid(orderId, paid) == 0) return@withTransaction false
+                    recalculateClosedDay(order.businessDayId)
+                    true
+                }
+                say(if (!updated) "Cannot update cancelled order" else if (paid) "Marked paid" else "Marked unpaid")
             } catch (e: Exception) { say("Payment update failed: ${e.message}") }
         }
     }
@@ -451,11 +460,12 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
                 val ok: Boolean = db.withTransaction {
                     val order = orderDao.getById(orderId) ?: return@withTransaction false
                     val day = dayDao.getById(order.businessDayId)
-                    if (day == null || day.closedAt != null) return@withTransaction false
+                    if (day == null) return@withTransaction false
                     cancelOrderInternal(orderId)
+                    recalculateClosedDay(order.businessDayId)
                     true
                 }
-                say(if (ok) "Order #$orderId cancelled" else "Only orders of the open business day can be cancelled")
+                say(if (ok) "Order #$orderId cancelled" else "Could not cancel order")
             } catch (e: Exception) {
                 say("Could not cancel order: ${e.message}")
             }
@@ -608,6 +618,100 @@ class MainViewModel(app: Application) : AndroidViewModel(app) {
             }
             onResult(ok)
         }
+    }
+
+    suspend fun getWastesForDay(dayId: Long): List<Waste> = wasteDao.getAllForDay(dayId)
+
+    /** Correct a closed day's opening values and business date without resetting its transactions. */
+    fun editHistoricalDay(dayId: Long, openedAt: Long, openingFloat: Long, targetUnits: Int, remit: Long, onResult: (Boolean) -> Unit = {}) {
+        viewModelScope.launch {
+            val ok = try { db.withTransaction {
+                val day = dayDao.getById(dayId) ?: return@withTransaction false
+                if (day.isOpen || openedAt <= 0 || openingFloat < 0 || targetUnits < 0 || remit < 0) return@withTransaction false
+                if (day.closedAt != null && openedAt > day.closedAt) return@withTransaction false
+                dayDao.update(day.copy(openedAt = openedAt, openingFloatCentavos = openingFloat,
+                    openingCashCentavos = openingFloat, targetUnits = targetUnits, remitCentavos = remit))
+                recalculateClosedDay(dayId)
+                true
+            } } catch (e: Exception) { say("Day edit failed: ${e.message}"); false }
+            say(if (ok) "Historical day updated" else "Historical day was not updated")
+            onResult(ok)
+        }
+    }
+
+    /** Recompute money from paid orders, single sales and expenses, never from editable total fields. */
+    private suspend fun recalculateClosedDay(dayId: Long) {
+        val day = dayDao.getById(dayId) ?: return
+        if (day.isOpen) return
+        val orders = orderDao.getAll().filter { it.businessDayId == dayId && it.status == STATUS_COMPLETED }
+        val paidCashOrders = orders.filter { it.paid && it.paymentMethod.equals("Cash", true) }.map { it.id }.toSet()
+        val lines = txDao.getForDay(dayId).filter { it.status == STATUS_COMPLETED }
+        val cash = lines.filter { it.orderId == null || it.orderId in paidCashOrders }.sumOf { it.totalCentavos } +
+            orders.filter { it.id in paidCashOrders }.sumOf { it.deliveryFeeCentavos }
+        val expenses = expenseDao.getAll().filter { it.businessDayId == dayId }.sumOf { it.amountCentavos }
+        val finalCash = day.openingFloatCentavos + cash - expenses
+        val remit = day.remitCentavos ?: 0L
+        dayDao.update(day.copy(finalCashCentavos = finalCash,
+            finalFloatCentavos = finalFloatFrom(finalCash, remit)))
+    }
+
+    fun editHistoricalExpense(expense: Expense, description: String, amount: Long) {
+        viewModelScope.launch { try { db.withTransaction {
+            require(description.isNotBlank() && amount >= 0)
+            require(dayDao.getById(expense.businessDayId)?.closedAt != null)
+            expenseDao.update(expense.copy(description = description.trim(), amountCentavos = amount))
+            recalculateClosedDay(expense.businessDayId)
+        }; say("Expense corrected") } catch (e: Exception) { say("Expense correction failed: ${e.message}") } }
+    }
+    fun deleteHistoricalExpense(expense: Expense) {
+        viewModelScope.launch { try { db.withTransaction {
+            require(dayDao.getById(expense.businessDayId)?.closedAt != null)
+            expenseDao.delete(expense); recalculateClosedDay(expense.businessDayId)
+        }; say("Expense deleted") } catch (e: Exception) { say("Could not delete expense: ${e.message}") } }
+    }
+    fun addHistoricalExpense(dayId: Long, description: String, amount: Long) {
+        viewModelScope.launch { try { db.withTransaction {
+            require(dayDao.getById(dayId)?.closedAt != null && description.isNotBlank() && amount >= 0)
+            expenseDao.insert(Expense(businessDayId = dayId, description = description.trim(), amountCentavos = amount, createdAt = System.currentTimeMillis()))
+            recalculateClosedDay(dayId)
+        }; say("Historical expense added") } catch (e: Exception) { say("Could not add expense: ${e.message}") } }
+    }
+    fun editHistoricalSale(tx: SalesTransaction, quantity: Int, unitPrice: Long) {
+        viewModelScope.launch { try { db.withTransaction {
+            require(tx.orderId == null && tx.status == STATUS_COMPLETED && quantity > 0 && unitPrice >= 0)
+            require(dayDao.getById(tx.businessDayId)?.closedAt != null)
+            val delta = tx.quantity - quantity
+            require(productDao.adjustStock(tx.productId, delta) > 0) { "Insufficient inventory" }
+            txDao.update(tx.copy(quantity = quantity, unitPriceCentavos = unitPrice, totalCentavos = unitPrice * quantity))
+            recalculateClosedDay(tx.businessDayId)
+        }; say("Historical sale corrected") } catch (e: Exception) { say("Sale correction failed: ${e.message}") } }
+    }
+    fun undoHistoricalSale(tx: SalesTransaction) {
+        viewModelScope.launch { try { db.withTransaction {
+            require(tx.orderId == null && tx.status == STATUS_COMPLETED)
+            require(dayDao.getById(tx.businessDayId)?.closedAt != null)
+            require(productDao.adjustStock(tx.productId, tx.quantity) > 0)
+            txDao.markUndone(tx.id, System.currentTimeMillis())
+            recalculateClosedDay(tx.businessDayId)
+        }; say("Historical sale reversed") } catch (e: Exception) { say("Could not reverse sale: ${e.message}") } }
+    }
+    fun editHistoricalWaste(waste: Waste, quantity: Int, reason: String, note: String) {
+        viewModelScope.launch { try { db.withTransaction {
+            require(quantity > 0 && reason.isNotBlank() && dayDao.getById(waste.businessDayId)?.closedAt != null)
+            require(productDao.adjustStock(waste.productId, waste.quantity - quantity) > 0) { "Insufficient stock" }
+            wasteDao.update(waste.copy(quantity = quantity, reason = reason.trim(), note = note.trim()))
+        }; say("Waste corrected") } catch (e: Exception) { say("Waste correction failed: ${e.message}") } }
+    }
+    fun deleteHistoricalWaste(waste: Waste) {
+        viewModelScope.launch { try { db.withTransaction {
+            require(dayDao.getById(waste.businessDayId)?.closedAt != null)
+            require(productDao.adjustStock(waste.productId, waste.quantity) > 0)
+            wasteDao.deleteById(waste.id)
+        }; say("Waste deleted") } catch (e: Exception) { say("Could not delete waste: ${e.message}") } }
+    }
+    fun recalculateHistoricalDay(dayId: Long) {
+        viewModelScope.launch { try { db.withTransaction { recalculateClosedDay(dayId) } }
+            catch (e: Exception) { say("Recalculation failed: ${e.message}") } }
     }
 
     /** Edits finals of a closed day. If the day has a remit, floating money is recomputed from it. */

@@ -163,7 +163,7 @@ abstract class AppDatabase : RoomDatabase() {
         /** Adds starter inventory without modifying existing products, stock or transactions. */
         private fun seedStarterInventory(db: SupportSQLiteDatabase) {
             val now = System.currentTimeMillis()
-            for (category in listOf("CHANOS", "S&M")) {
+            for (category in listOf("CHANOS")) {
                 db.execSQL(
                     "INSERT INTO categories (name, createdAt) SELECT ?, ? WHERE NOT EXISTS " +
                         "(SELECT 1 FROM categories WHERE name = ? COLLATE NOCASE)",
@@ -173,13 +173,7 @@ abstract class AppDatabase : RoomDatabase() {
             val products = listOf(
                 arrayOf("Dry Rub Signature", "CHANOS", 23000L, 7000L, 10),
                 arrayOf("Marinated Classic", "CHANOS", 23000L, 7000L, 10),
-                arrayOf("Steamed-Grilled", "CHANOS", 23000L, 6500L, 10),
-                arrayOf("Classic Lumpia", "S&M", 18500L, 5000L, 20),
-                arrayOf("Cheese Lumpia", "S&M", 22000L, 5000L, 25),
-                arrayOf("Longganisa Patty", "S&M", 18500L, 7500L, 20),
-                arrayOf("Chicken Cordon Bleu", "S&M", 22000L, 5500L, 20),
-                arrayOf("Daing Bangus", "S&M", 22000L, 6000L, 10),
-                arrayOf("Cheese Sticks", "S&M", 8000L, 2500L, 20)
+                arrayOf("Steamed-Grilled", "CHANOS", 23000L, 6500L, 10)
             )
             for (product in products) {
                 val name = product[0] as String
@@ -195,8 +189,7 @@ abstract class AppDatabase : RoomDatabase() {
 
         private val MIGRATION_8_9 = object : Migration(8, 9) {
             override fun migrate(db: SupportSQLiteDatabase) {
-                seedStarterInventory(db)
-                seedDefaultRates(db)
+                // No reseeding on upgrade.
             }
         }
 
@@ -246,8 +239,7 @@ abstract class AppDatabase : RoomDatabase() {
         private val MIGRATION_9_10 = object : Migration(9, 10) {
             override fun migrate(db: SupportSQLiteDatabase) {
                 // Idempotent: only absent starter entries are inserted.
-                seedStarterInventory(db)
-                seedDefaultRates(db)
+                // Existing user choices, including deletions, are authoritative.
             }
         }
 
@@ -257,7 +249,7 @@ abstract class AppDatabase : RoomDatabase() {
          * The NOT EXISTS guards never reset stock, edited prices, or existing delivery rates.
          */
         private val ENSURE_STARTER_DATA = object : RoomDatabase.Callback() {
-            override fun onOpen(db: SupportSQLiteDatabase) {
+            override fun onCreate(db: SupportSQLiteDatabase) {
                 db.beginTransaction()
                 try {
                     seedStarterInventory(db)

@@ -92,7 +92,8 @@ private fun OrderForm(
     // null = "Custom" (manual amount). Otherwise the id of the chosen Delivery Rate; its fee is COPIED into `fee`.
     var selectedRateId by remember { mutableStateOf<Long?>(null) }
     var note by remember { mutableStateOf("") }
-    var payment by remember { mutableStateOf(PAYMENT_COD) }
+    var payment by remember { mutableStateOf("Cash") }
+    var paymentPaid by remember { mutableStateOf(false) }
     var deliveryTime by remember { mutableStateOf(DELIVERY_TIME_PENDING) }
     val qty = remember { mutableStateMapOf<Long, Int>() }
     var showErrors by remember { mutableStateOf(false) }
@@ -214,6 +215,13 @@ private fun OrderForm(
                 onSelect = { payment = it }
             )
 
+            OptionDropdown(
+                label = "Payment status",
+                selected = if (paymentPaid) "Paid" else "On Delivery / Pickup",
+                options = listOf("Paid", "On Delivery / Pickup"),
+                onSelect = { paymentPaid = it == "Paid" }
+            )
+
             Text("Items", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
             groupedProducts(products, categories).forEach { (categoryName, categoryProducts) ->
                 Text(categoryName, style = MaterialTheme.typography.titleMedium,
@@ -268,7 +276,7 @@ private fun OrderForm(
                         "$totalUnits units • items ${Fmt.peso(itemsTotal)}\n" +
                         (if (delivery) "Delivery fee ${Fmt.peso(feeCentavos)}\n" else "") +
                         (if (delivery) "Delivery time: $deliveryTime\n" else "Pickup time: $deliveryTime\n") +
-                        "Payment: $payment\n" +
+                        "Payment: $payment • ${if (paymentPaid) "Paid" else "On Delivery / Pickup"}\n" +
                         "Total ${Fmt.peso(grandTotal)}\n\n" +
                         "It will be counted as sales of the current business day."
                 )
@@ -284,7 +292,7 @@ private fun OrderForm(
                                 val n = qty[p.id] ?: 0
                                 if (n > 0) p.id to n else null
                             }
-                            vm.createOrder(customer, type, address, feeCentavos, note, items, payment, deliveryTime) { ok ->
+                            vm.createOrder(customer, type, address, feeCentavos, note, items, payment, deliveryTime, paymentPaid) { ok ->
                                 busy = false
                                 if (ok) {
                                     if (chosenCustomer == null && saveNewCustomer && customer.isNotBlank() &&

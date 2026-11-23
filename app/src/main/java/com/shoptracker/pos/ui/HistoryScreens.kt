@@ -20,6 +20,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
@@ -34,6 +35,15 @@ import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import com.shoptracker.pos.MainViewModel
 import com.shoptracker.pos.data.BusinessDay
+import com.shoptracker.pos.data.Expense
+import com.shoptracker.pos.data.SalesTransaction
+import com.shoptracker.pos.data.Waste
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.ui.text.input.KeyboardType
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.shoptracker.pos.data.DayStats
 import com.shoptracker.pos.data.STATUS_COMPLETED
 import com.shoptracker.pos.data.computeStats
@@ -107,7 +117,8 @@ fun DayDetailScreen(
     vm: MainViewModel,
     dayId: Long,
     onBack: () -> Unit,
-    onCloseDay: () -> Unit
+    onCloseDay: () -> Unit,
+    onEditOrder: (Long) -> Unit
 ) {
     val days by vm.allDays.collectAsState()
     val day = days.firstOrNull { it.id == dayId }
@@ -117,16 +128,25 @@ fun DayDetailScreen(
         if (day == null) {
             EmptyState("Day not found", "This business day is no longer available.")
         } else {
-            DayDetailContent(vm, day, onCloseDay)
+            DayDetailContent(vm, day, onCloseDay, onEditOrder)
         }
     }
 }
 
 @Composable
-private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: () -> Unit) {
+private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: () -> Unit, onEditOrder: (Long) -> Unit) {
     val data = rememberDayData(vm, setOf(day.id))
     val stats = data.stats
+    val payments = paymentSummary(data)
     var editFinals by remember { mutableStateOf(false) }
+    var editDay by remember { mutableStateOf(false) }
+    var editingExpense by remember { mutableStateOf<Expense?>(null) }
+    var addingExpense by remember { mutableStateOf(false) }
+    var editingSale by remember { mutableStateOf<SalesTransaction?>(null) }
+    var editingWaste by remember { mutableStateOf<Waste?>(null) }
+    var confirmDelete by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var wastes by remember { mutableStateOf<List<Waste>>(emptyList()) }
+    LaunchedEffect(day.id, data.txns, data.expenses) { wastes = vm.getWastesForDay(day.id) }
 
     Column(
         Modifier
@@ -157,9 +177,14 @@ private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: ()
                 Text("No expenses recorded.", style = MaterialTheme.typography.bodyMedium)
             } else {
                 data.expenses.forEach { e ->
-                    LabelValue("${e.description} (${Fmt.time(e.createdAt)})", Fmt.peso(e.amountCentavos))
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Column(Modifier.weight(1f)) { LabelValue("${e.description} (${Fmt.time(e.createdAt)})", Fmt.peso(e.amountCentavos)) }
+                        if (!day.isOpen) TextButton(onClick = { editingExpense = e }) { Text("Edit") }
+                        if (!day.isOpen) TextButton(onClick = { confirmDelete = { vm.deleteHistoricalExpense(e) } }) { Text("Delete") }
+                    }
                 }
             }
+            if (!day.isOpen) OutlinedButton(onClick = { addingExpense = true }) { Text("Add missing expense") }
             LabelValue("Total expenses", Fmt.peso(data.totalExpenses), bold = true)
             LabelValue(
                 "Net (profit + delivery fees - expenses)",
@@ -167,6 +192,14 @@ private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: ()
                 valueColor = deltaColor(data.net),
                 bold = true
             )
+        }
+
+        SectionCard("Payments received") {
+            LabelValue("Cash received", Fmt.peso(payments.cash))
+            LabelValue("QR received", Fmt.peso(payments.qr))
+            LabelValue("Total received", Fmt.peso(payments.received), bold = true)
+            LabelValue("Unpaid orders", Fmt.peso(payments.outstanding))
+            LabelValue("Total sales", Fmt.peso(stats.gross), bold = true)
         }
 
         SectionCard("Money (physical cash is tracked separately from sales)") {
@@ -180,8 +213,14 @@ private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: ()
         if (day.isOpen) {
             Button(onClick = onCloseDay, modifier = Modifier.fillMaxWidth()) { Text("Close this day…") }
         } else {
+            OutlinedButton(onClick = { editDay = true }, modifier = Modifier.fillMaxWidth()) {
+                Text("Edit day date, opening float, target and remittance")
+            }
             OutlinedButton(onClick = { editFinals = true }, modifier = Modifier.fillMaxWidth()) {
-                Text("Edit final amounts")
+                Text("Review final amounts")
+            }
+            OutlinedButton(onClick = { vm.recalculateHistoricalDay(day.id) }, modifier = Modifier.fillMaxWidth()) {
+                Text("Recalculate cash from corrected records")
             }
         }
 
@@ -195,6 +234,27 @@ private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: ()
             }
         }
 
+        if (!day.isOpen) SectionCard("Orders (${data.orders.size})") {
+            data.orders.forEach { order ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("#${order.id} • ${order.customerName} • ${order.paymentMethod} • ${if (order.paid) "Paid" else "Unpaid"}", Modifier.weight(1f))
+                    if (order.status == STATUS_COMPLETED) {
+                        TextButton(onClick = { onEditOrder(order.id) }) { Text("Edit") }
+                        TextButton(onClick = { confirmDelete = { vm.cancelOrder(order.id) } }) { Text("Cancel") }
+                    }
+                    TextButton(onClick = { confirmDelete = { vm.deleteOrder(order.id) } }) { Text("Delete") }
+                }
+            }
+        }
+        if (!day.isOpen) SectionCard("Wastes (${wastes.size})") {
+            wastes.forEach { waste ->
+                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                    Text("${waste.productName} × ${waste.quantity} • ${waste.reason}", Modifier.weight(1f))
+                    TextButton(onClick = { editingWaste = waste }) { Text("Edit") }
+                    TextButton(onClick = { confirmDelete = { vm.deleteHistoricalWaste(waste) } }) { Text("Delete") }
+                }
+            }
+        }
         SectionCard("Transactions (${data.txns.size})") {
             if (data.txns.isEmpty()) {
                 Text("No transactions yet.", style = MaterialTheme.typography.bodyMedium)
@@ -217,16 +277,41 @@ private fun DayDetailContent(vm: MainViewModel, day: BusinessDay, onCloseDay: ()
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Text(
-                            Fmt.peso(t.totalCentavos),
-                            style = MaterialTheme.typography.bodyMedium,
-                            textDecoration = if (done) TextDecoration.None else TextDecoration.LineThrough
-                        )
+                        Column(horizontalAlignment = Alignment.End) {
+                            Text(Fmt.peso(t.totalCentavos), style = MaterialTheme.typography.bodyMedium,
+                                textDecoration = if (done) TextDecoration.None else TextDecoration.LineThrough)
+                            if (!day.isOpen && done && t.orderId == null) {
+                                TextButton(onClick = { editingSale = t }) { Text("Edit") }
+                                TextButton(onClick = { confirmDelete = { vm.undoHistoricalSale(t) } }) { Text("Reverse") }
+                            }
+                        }
                     }
                 }
             }
         }
     }
+
+    if (editDay) HistoricalDayDialog(day, onDismiss = { editDay = false }) { date, opening, target, remit ->
+        vm.editHistoricalDay(day.id, date, opening, target, remit)
+        editDay = false
+    }
+    if (addingExpense) HistoricalExpenseDialog(null, onDismiss = { addingExpense = false }) { name, amount ->
+        vm.addHistoricalExpense(day.id, name, amount); addingExpense = false
+    }
+    editingExpense?.let { e -> HistoricalExpenseDialog(e, onDismiss = { editingExpense = null }) { name, amount ->
+        vm.editHistoricalExpense(e, name, amount); editingExpense = null
+    } }
+    editingSale?.let { tx -> HistoricalSaleDialog(tx, onDismiss = { editingSale = null }) { quantity, price ->
+        vm.editHistoricalSale(tx, quantity, price); editingSale = null
+    } }
+    editingWaste?.let { waste -> HistoricalWasteDialog(waste, onDismiss = { editingWaste = null }) { quantity, reason, note ->
+        vm.editHistoricalWaste(waste, quantity, reason, note); editingWaste = null
+    } }
+    confirmDelete?.let { action -> AlertDialog(onDismissRequest = { confirmDelete = null },
+        title = { Text("Confirm historical correction") },
+        text = { Text("This changes saved historical records and may adjust inventory and financial totals. Continue?") },
+        confirmButton = { TextButton(onClick = { action(); confirmDelete = null }) { Text("Confirm") } },
+        dismissButton = { TextButton(onClick = { confirmDelete = null }) { Text("Cancel") } }) }
 
     if (editFinals) {
         EditFinalsDialog(
@@ -279,4 +364,72 @@ private fun EditFinalsDialog(day: BusinessDay, onDismiss: () -> Unit, onSave: (L
         },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } }
     )
+}
+
+@Composable
+private fun HistoricalDayDialog(day: BusinessDay, onDismiss: () -> Unit, onSave: (Long, Long, Int, Long) -> Unit) {
+    val format = remember { SimpleDateFormat("yyyy-MM-dd", Locale.US).apply { isLenient = false } }
+    var date by remember(day.id) { mutableStateOf(format.format(Date(day.openedAt))) }
+    var opening by remember(day.id) { mutableStateOf(Fmt.plain(day.openingFloatCentavos)) }
+    var target by remember(day.id) { mutableStateOf(day.targetUnits.toString()) }
+    var remit by remember(day.id) { mutableStateOf(Fmt.plain(day.remitCentavos ?: 0L)) }
+    var error by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Edit historical business day") }, text = {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            OutlinedTextField(date, { date = it }, label = { Text("Business date (YYYY-MM-DD)") })
+            OutlinedTextField(opening, { opening = it }, label = { Text("Starting floating money (₱)") })
+            OutlinedTextField(target, { target = it }, label = { Text("Target units") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(remit, { remit = it }, label = { Text("Remittance (₱)") })
+            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error)
+        }
+    }, confirmButton = { TextButton(onClick = {
+        val dateMillis = try { format.parse(date)?.time } catch (_: Exception) { null }
+        val float = Fmt.parsePeso(opening); val rem = Fmt.parsePeso(remit); val units = target.toIntOrNull()
+        if (dateMillis == null || float == null || rem == null || units == null || float < 0 || rem < 0 || units < 0) error = "Enter valid nonnegative values and a date"
+        else onSave(dateMillis, float, units, rem)
+    }) { Text("Save changes") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+private fun HistoricalExpenseDialog(expense: Expense?, onDismiss: () -> Unit, onSave: (String, Long) -> Unit) {
+    var description by remember(expense?.id) { mutableStateOf(expense?.description ?: "") }
+    var amount by remember(expense?.id) { mutableStateOf(Fmt.plain(expense?.amountCentavos ?: 0L)) }
+    var error by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text(if (expense == null) "Add historical expense" else "Edit expense") }, text = {
+        Column { OutlinedTextField(description, { description = it }, label = { Text("Description") })
+            OutlinedTextField(amount, { amount = it }, label = { Text("Amount (₱)") })
+            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error) }
+    }, confirmButton = { TextButton(onClick = { val cents = Fmt.parsePeso(amount)
+        if (description.isBlank() || cents == null || cents < 0) error = "Enter a description and valid amount" else onSave(description, cents)
+    }) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+private fun HistoricalSaleDialog(tx: SalesTransaction, onDismiss: () -> Unit, onSave: (Int, Long) -> Unit) {
+    var quantity by remember(tx.id) { mutableStateOf(tx.quantity.toString()) }
+    var price by remember(tx.id) { mutableStateOf(Fmt.plain(tx.unitPriceCentavos)) }
+    var error by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Correct sale: ${tx.productName}") }, text = {
+        Column { OutlinedTextField(quantity, { quantity = it }, label = { Text("Quantity") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(price, { price = it }, label = { Text("Unit price (₱)") })
+            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error) }
+    }, confirmButton = { TextButton(onClick = { val q = quantity.toIntOrNull(); val p = Fmt.parsePeso(price)
+        if (q == null || q <= 0 || p == null || p < 0) error = "Enter valid quantity and price" else onSave(q, p)
+    }) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
+}
+
+@Composable
+private fun HistoricalWasteDialog(waste: Waste, onDismiss: () -> Unit, onSave: (Int, String, String) -> Unit) {
+    var quantity by remember(waste.id) { mutableStateOf(waste.quantity.toString()) }
+    var reason by remember(waste.id) { mutableStateOf(waste.reason) }
+    var note by remember(waste.id) { mutableStateOf(waste.note) }
+    var error by remember { mutableStateOf("") }
+    AlertDialog(onDismissRequest = onDismiss, title = { Text("Correct waste: ${waste.productName}") }, text = {
+        Column { OutlinedTextField(quantity, { quantity = it }, label = { Text("Quantity") }, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+            OutlinedTextField(reason, { reason = it }, label = { Text("Reason") })
+            OutlinedTextField(note, { note = it }, label = { Text("Notes") })
+            if (error.isNotBlank()) Text(error, color = MaterialTheme.colorScheme.error) }
+    }, confirmButton = { TextButton(onClick = { val q = quantity.toIntOrNull()
+        if (q == null || q <= 0 || reason.isBlank()) error = "Enter valid quantity and reason" else onSave(q, reason, note)
+    }) { Text("Save") } }, dismissButton = { TextButton(onClick = onDismiss) { Text("Cancel") } })
 }

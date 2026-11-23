@@ -13,7 +13,7 @@ import com.shoptracker.pos.MainViewModel
 import com.shoptracker.pos.data.*
 import com.shoptracker.pos.util.Fmt
 
-/** Edits an open-day order without changing its identity or day. All changes commit atomically. */
+/** Edits an order in an open or closed business day, with atomic inventory adjustments. */
 @Composable
 fun EditOrderScreen(vm: MainViewModel, orderId: Long, onBack: () -> Unit) {
     val orders by vm.allOrders.collectAsState()
@@ -24,7 +24,7 @@ fun EditOrderScreen(vm: MainViewModel, orderId: Long, onBack: () -> Unit) {
     val original = orders.firstOrNull { it.id == orderId }
     val lines = remember(txns, orderId) { txns.filter { it.orderId == orderId && it.status == STATUS_COMPLETED } }
     if (original == null) { Column { ScreenHeader("Edit order", onBack); Text("Order no longer exists") }; return }
-    val editable = days.any { it.id == original.businessDayId && it.isOpen } && original.status == STATUS_COMPLETED
+    val editable = days.any { it.id == original.businessDayId } && original.status == STATUS_COMPLETED
     var customer by remember(orderId) { mutableStateOf(original.customerName) }
     var type by remember(orderId) { mutableStateOf(original.type) }
     var address by remember(orderId) { mutableStateOf(original.address) }
@@ -40,7 +40,7 @@ fun EditOrderScreen(vm: MainViewModel, orderId: Long, onBack: () -> Unit) {
     var error by remember { mutableStateOf("") }
     Column(Modifier.fillMaxSize()) {
         ScreenHeader("Edit order #$orderId", onBack)
-        if (!editable) Text("Only active, non-cancelled orders in an open business day can be edited.", Modifier.padding(12.dp))
+        if (!editable) Text("Cancelled orders cannot be edited.", Modifier.padding(12.dp))
         else {
             Column(Modifier.weight(1f).verticalScroll(rememberScrollState()).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 OutlinedTextField(customer, { customer = it }, label = { Text("Customer") }, modifier = Modifier.fillMaxWidth())

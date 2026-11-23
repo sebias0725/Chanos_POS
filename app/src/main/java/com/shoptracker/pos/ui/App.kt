@@ -133,7 +133,8 @@ fun App(vm: MainViewModel) {
                     vm = vm,
                     dayId = screen.dayId,
                     onBack = { pop() },
-                    onCloseDay = { push(Screen.NewDay) }
+                    onCloseDay = { push(Screen.NewDay) },
+                    onEditOrder = { push(Screen.EditOrder(it)) }
                 )
                 Screen.Chart -> ChartScreen(vm, onBack = { pop() })
                 Screen.Compare -> CompareScreen(vm, onBack = { pop() })

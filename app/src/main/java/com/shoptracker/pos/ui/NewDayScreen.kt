@@ -54,6 +54,8 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
     val lowStockThreshold = androidx.compose.ui.platform.LocalContext.current.getSharedPreferences("settings", android.content.Context.MODE_PRIVATE).getInt("low_stock_threshold", 5)
     val lowStock = products.filter { it.active && it.stock <= lowStockThreshold }.sortedWith(compareBy({ it.stock }, { it.name }))
 
+    val payments = paymentSummary(data)
+    val calculatedCash = day.openingFloatCentavos + payments.cash - data.totalExpenses
     var finalCash by remember { mutableStateOf("") }
     var remit by remember { mutableStateOf("") }
     var showErrors by remember { mutableStateOf(false) }
@@ -61,7 +63,7 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
     var busy by remember { mutableStateOf(false) }
     var addingExpense by remember { mutableStateOf(false) }
 
-    val cashC = Fmt.parsePeso(finalCash)
+    val cashC = calculatedCash
     val remitC = Fmt.parsePeso(remit)
     val floatC = if (cashC != null && remitC != null) finalFloatFrom(cashC, remitC) else null
     val remitTooHigh = floatC != null && floatC < 0
@@ -124,15 +126,19 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
                 LabelValue("Opening cash on hand", Fmt.peso(day.openingCashCentavos))
             }
 
-            Text(
-                "Count your money and enter the final cash on hand and the amount remitted. Sales and expenses " +
-                    "are shown for reference only; they are not added to or subtracted from your cash automatically.",
-                style = MaterialTheme.typography.bodySmall
-            )
-            MoneyField(
-                finalCash, { finalCash = it }, "Final cash on hand",
-                error = if (showErrors && cashC == null) "Enter an amount (0 is fine)" else null
-            )
+            SectionCard("Payments received") {
+                LabelValue("Cash received", Fmt.peso(payments.cash))
+                LabelValue("QR received", Fmt.peso(payments.qr))
+                LabelValue("Total received", Fmt.peso(payments.received), bold = true)
+                LabelValue("Outstanding payments", Fmt.peso(payments.outstanding))
+                LabelValue("Total sales", Fmt.peso(stats.gross), bold = true)
+            }
+            SectionCard("Calculated cash on hand") {
+                LabelValue("Starting float", Fmt.peso(day.openingFloatCentavos))
+                LabelValue("+ Cash received", Fmt.peso(payments.cash))
+                LabelValue("- Expenses", Fmt.peso(data.totalExpenses))
+                LabelValue("Final cash on hand", Fmt.peso(calculatedCash), bold = true)
+            }
             MoneyField(
                 remit, { remit = it }, "Remit",
                 error = when {
@@ -141,6 +147,7 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
                     else -> null
                 }
             )
+            if (showErrors && cashC < 0) Text("Calculated cash is negative. Check expenses and payments.", color = MaterialTheme.colorScheme.error)
             SectionCard("Final floating money (cash on hand - remit)") {
                 LabelValue(
                     "Final floating money",
@@ -151,7 +158,7 @@ private fun CloseDayStep(vm: MainViewModel, day: BusinessDay, onBack: () -> Unit
         }
         Button(
             onClick = {
-                if (cashC == null || remitC == null || floatC == null || remitTooHigh) showErrors = true
+                if (cashC < 0 || remitC == null || floatC == null || remitTooHigh) showErrors = true
                 else confirm = true
             },
             enabled = !busy,
@@ -206,15 +213,15 @@ private fun StartDayStep(vm: MainViewModel, onBack: () -> Unit, onDone: () -> Un
     val prevData = rememberDayData(vm, setOfNotNull(prev?.id))
 
     var openFloat by remember { mutableStateOf("") }
-    var openCash by remember { mutableStateOf("") }
-    var target by remember { mutableStateOf("") }
+    
+    
     var showErrors by remember { mutableStateOf(false) }
     var confirm by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
 
     val floatC = Fmt.parsePeso(openFloat)
-    val cashC = Fmt.parsePeso(openCash)
-    val targetN = if (target.isBlank()) 0 else target.toIntOrNull()
+    val cashC = floatC
+    val targetN = 0
 
     Column(Modifier.fillMaxSize()) {
         ScreenHeader(if (prev == null) "Start your first day" else "Start new day", onBack)
@@ -252,20 +259,6 @@ private fun StartDayStep(vm: MainViewModel, onBack: () -> Unit, onDone: () -> Un
                     Text("Use previous final: ${Fmt.peso(prev.finalFloatCentavos)}")
                 }
             }
-            MoneyField(
-                openCash, { openCash = it }, "Opening cash on hand (PHP)",
-                error = if (showErrors && cashC == null) "Enter an amount (0 is fine)" else null
-            )
-            if (prev?.finalCashCentavos != null) {
-                TextButton(onClick = { openCash = Fmt.plain(prev.finalCashCentavos) }) {
-                    Text("Use previous final: ${Fmt.peso(prev.finalCashCentavos)}")
-                }
-            }
-            NumberField(
-                target, { target = it }, "Target sales",
-                error = if (showErrors && targetN == null) "Enter a whole number" else null,
-                hint = ""
-            )
         }
         Button(
             onClick = {
@@ -286,8 +279,7 @@ private fun StartDayStep(vm: MainViewModel, onBack: () -> Unit, onDone: () -> Un
             text = {
                 Text(
                     "Opening floating money: ${Fmt.peso(floatC)}\n" +
-                        "Opening cash on hand: ${Fmt.peso(cashC)}\n" +
-                        "Target: " + (if (targetN > 0) "$targetN units" else "none")
+                        "Starting float will be used as opening cash on hand."
                 )
             },
             confirmButton = {

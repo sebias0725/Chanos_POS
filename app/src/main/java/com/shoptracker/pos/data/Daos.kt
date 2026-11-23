@@ -116,6 +116,9 @@ interface TransactionDao {
     @Insert
     suspend fun insert(tx: SalesTransaction): Long
 
+    @Update
+    suspend fun update(tx: SalesTransaction)
+
     @Query("DELETE FROM sales_transactions WHERE orderId = :orderId")
     suspend fun deleteByOrder(orderId: Long)
 
@@ -177,6 +180,9 @@ interface ExpenseDao {
     @Delete
     suspend fun delete(expense: Expense)
 
+    @Update
+    suspend fun update(expense: Expense)
+
     @Query("DELETE FROM expenses WHERE businessDayId = :dayId")
     suspend fun deleteByDay(dayId: Long)
 }
@@ -191,6 +197,9 @@ interface WasteDao {
 
     @Query("SELECT * FROM wastes WHERE businessDayId = :dayId")
     suspend fun getAllForDay(dayId: Long): List<Waste>
+
+    @Update
+    suspend fun update(waste: Waste)
 
     @Query("DELETE FROM wastes WHERE businessDayId = :dayId")
     suspend fun deleteByDay(dayId: Long)
